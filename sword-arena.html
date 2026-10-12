@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sword Arena</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
+<style>
+  /* Sunset colosseum: one look on purpose. */
+  :root { --bg:#2a1a20; --fg:#fff6e8; --muted:#e0c8a8; --gold:#ffc830; --red:#ff3d4d; --panel:rgba(30,16,12,.9); color-scheme: dark; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden;
+               font-family:'Press Start 2P', ui-monospace, monospace; }
+  [hidden] { display:none !important; }
+  canvas { display:block; }
+  canvas.playing { cursor:none; }
+  .bar { height:14px; background:rgba(0,0,0,.6); border:2px solid #000; }
+  .bar i { display:block; height:100%; width:100%; transition:width .15s; }
+  #you { position:fixed; left:50%; bottom:70px; transform:translateX(-50%); width:min(360px, 70vw); font-size:9px; text-shadow:2px 2px 0 #000; pointer-events:none; }
+  #you .bar i { background:linear-gradient(#7dff6b, #3aa83a); }
+  #foe { position:fixed; left:50%; top:16px; transform:translateX(-50%); width:min(460px, 80vw); text-align:center; font-size:10px; text-shadow:2px 2px 0 #000; pointer-events:none; }
+  #foe .bar i { background:linear-gradient(#ff6b6b, #c01a2a); }
+  #foeName { margin-bottom:6px; color:var(--gold); }
+  #round { position:fixed; left:16px; top:16px; font-size:10px; color:var(--muted); text-shadow:2px 2px 0 #000; pointer-events:none; }
+  #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:rgba(255,255,255,.6); pointer-events:none; }
+  #hurt { position:fixed; inset:0; pointer-events:none; box-shadow: inset 0 0 140px 50px rgba(255,0,0,.85); opacity:0; transition:opacity .4s; }
+  #tip { position:fixed; left:0; right:0; top:64px; text-align:center; font-size:9px; text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
+  .overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(20,8,6,.55); padding:16px; }
+  .card { background:var(--panel); border:3px solid #000; outline:3px solid #8a5a2a; padding:24px; max-width:560px;
+          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7; }
+  .card h1 { margin:0; font-family:'Cinzel Decorative', Georgia, serif; font-size:clamp(28px, 6vw, 44px); color:var(--gold); text-shadow:3px 3px 0 #5a2000; }
+  .card h2 { margin:0; font-size:22px; color:var(--gold); }
+  .card p { margin:0; font-size:10px; color:var(--muted); }
+  .foes { display:flex; justify-content:center; gap:10px; flex-wrap:wrap; font-size:8px; }
+  .foes span { border:2px solid #000; padding:6px 8px; background:rgba(0,0,0,.35); }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:12px; text-align:left; font-size:8px; color:var(--muted); }
+  .controls b { color:var(--fg); display:block; margin-bottom:4px; }
+  @media (max-width: 520px) { .controls { grid-template-columns:1fr; } }
+  button.mc { font:inherit; font-size:12px; color:#fff; background:#6b6b6b; border:3px solid #000;
+              box-shadow: inset -3px -3px 0 #3a3a3a, inset 3px 3px 0 #a8a8a8; padding:12px 16px; cursor:pointer; text-shadow:2px 2px 0 #333; }
+  button.mc:hover, button.mc:focus-visible { background:#a8543a; outline:none; }
+  .sens { display:flex; flex-direction:column; gap:8px; font-size:9px; color:var(--muted); }
+  .sens input { width:100%; accent-color:#a8543a; }
+  a.back { font-size:9px; color:var(--muted); }
+  #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
+</style>
+</head>
+<body>
+<div id="round" hidden>ROUND 1/3</div>
+<div id="foe" hidden><div id="foeName">THE SQUIRE</div><div class="bar"><i id="foeHp"></i></div></div>
+<div id="you" hidden>YOU<div class="bar"><i id="youHp"></i></div></div>
+<div id="cross" hidden></div>
+<div id="hurt"></div>
+<div id="tip" hidden></div>
+<button id="pauseBtn" class="mc" type="button" hidden>❚❚ PAUSE</button>
+
+<div id="intro" class="overlay">
+  <div class="card">
+    <h1>Sword Arena</h1>
+    <p>Defeat 3 knights in a row to become CHAMPION. Each one is tougher than the last. Watch for their sword to glow: that means a strike is coming!</p>
+    <div class="foes"><span style="color:#7dff6b">1. THE SQUIRE</span><span style="color:#d8e0f0">2. THE KNIGHT</span><span style="color:#ff5050">3. THE BLACK KNIGHT</span></div>
+    <div class="controls">
+      <div><b>PC</b>Left click: swing sword<br>Hold right click: block<br>Block just before a hit: PARRY!<br>Shift: dash · Space: jump<br>W A S D: move · P: pause</div>
+      <div><b>QUEST</b>Swing your arm to attack<br>(harder swings hit harder)<br>Put your sword in the way<br>of theirs to block<br>Left stick: move · X: pause</div>
+    </div>
+    <button id="playBtn" class="mc" type="button">ENTER THE ARENA</button>
+    <a class="back" href="index.html">← Back to Arcade</a>
+  </div>
+</div>
+
+<div id="pauseMenu" class="overlay" hidden>
+  <div class="card">
+    <h2>PAUSED</h2>
+    <button id="resumeBtn" class="mc" type="button">Resume</button>
+    <label class="sens" for="sens">MOUSE SENSITIVITY: <span id="sensVal">100%</span>
+      <input id="sens" type="range" min="0" max="200" step="1" value="100">
+    </label>
+    <button id="restartBtn" class="mc" type="button">Restart from Round 1</button>
+    <button id="arcadeBtn" class="mc" type="button">Back to Arcade</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+// ---------- The 3 opponents (each one tougher) ----------
+// windup: seconds their sword glows before striking · combo: hits in a row · blockChance: how often they block you
+// interrupt: chance your hit cancels their attack · lunge: chance to dash at you from far away
+const FOES = [
+  { name: 'THE SQUIRE',       hp: 80,  speed: 2.0, windup: 0.95, recover: 1.3, damage: 8,  combo: 1, blockChance: 0.15, interrupt: 1.0, lunge: 0,    strafe: 0.4, size: 1.0,
+    armor: 0x5a8a3a, trim: 0x8a6a3a, helm: 0x9a9aa0, shield: 0x3a6a2a, eyes: null },
+  { name: 'THE KNIGHT',       hp: 120, speed: 2.8, windup: 0.65, recover: 0.9, damage: 12, combo: 2, blockChance: 0.35, interrupt: 0.5, lunge: 0.15, strafe: 0.9, size: 1.05,
+    armor: 0xc8d0dc, trim: 0x3a5aaa, helm: 0xd8e0ec, shield: 0x2a4aa0, eyes: null },
+  { name: 'THE BLACK KNIGHT', hp: 180, speed: 3.4, windup: 0.42, recover: 0.6, damage: 16, combo: 3, blockChance: 0.55, interrupt: 0,   lunge: 0.5,  strafe: 1.4, size: 1.2,
+    armor: 0x1a1a22, trim: 0x8a1020, helm: 0x22222a, shield: 0x1a1a1a, eyes: 0xff2020 },
+];
+const PLAYER_HP = 100;
+const SWORD_DAMAGE = 12;          // normal swing (overhead does a bit more)
+const PARRY_WINDOW = 0.25;        // seconds: block this soon before a hit to parry
+const ARENA_R = 12.5;
+const WALK_SPEED = 4.3, JUMP_SPEED = 8.4, GRAVITY = 28, EDGE_TURN_SPEED = 2.4;
+let mcSensitivity = 0.5;
+try { const s = parseFloat(localStorage.getItem('mcSensitivity')); if (s >= 0 && s <= 1) mcSensitivity = s; } catch (e) {}
+function radiansPerPixel() { const f = mcSensitivity * 0.6 + 0.2; return f * f * f * 8 * 0.15 * Math.PI / 180; }
+
+// ---------- Basic setup ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+const scene = new THREE.Scene();
+const FOG = new THREE.Color(0xe8a080);
+scene.background = FOG.clone();
+scene.fog = new THREE.Fog(FOG, 40, 110);
+const rig = new THREE.Group();
+scene.add(rig);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.03, 300);
+camera.rotation.order = 'YXZ';
+rig.add(camera);
+scene.add(new THREE.HemisphereLight(0xffe0c8, 0x6a4a3a, 1.5));
+const sunLight = new THREE.DirectionalLight(0xffc890, 1.8);
+sunLight.position.set(-20, 25, -30);
+scene.add(sunLight);
+
+function canvasTex(w, h, draw, pixel = true) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (pixel) t.magFilter = THREE.NearestFilter;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const shadeRGB = (r, g, b, f) => `rgb(${Math.min(255, r * f) | 0},${Math.min(255, g * f) | 0},${Math.min(255, b * f) | 0})`;
+const glowTex = canvasTex(64, 64, (g) => {
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.35, 'rgba(255,255,255,0.4)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+}, false);
+const glowSprite = (color, size, opacity = 1) => { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false })); s.scale.setScalar(size); return s; };
+
+// ---------- The colosseum ----------
+{
+  const sand = canvasTex(32, 32, (g) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) { g.fillStyle = shadeRGB(214, 180, 130, 0.85 + Math.random() * 0.25); g.fillRect(x, y, 1, 1); } });
+  sand.wrapS = sand.wrapT = THREE.RepeatWrapping; sand.repeat.set(14, 14);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(ARENA_R + 1, 48), new THREE.MeshLambertMaterial({ map: sand }));
+  floor.rotation.x = -Math.PI / 2;
+  scene.add(floor);
+  const stone = canvasTex(32, 32, (g) => {
+    g.fillStyle = '#6a5a4a'; g.fillRect(0, 0, 32, 32);
+    for (let row = 0; row < 4; row++) for (let col = -1; col < 3; col++) {
+      const x = col * 16 + (row % 2 ? 8 : 0), y = row * 8;
+      for (let py = 1; py < 8; py++) for (let px = 1; px < 16; px++) { g.fillStyle = shadeRGB(196, 170, 136, 0.8 + Math.random() * 0.25); g.fillRect(x + px, y + py, 1, 1); }
+    }
+  });
+  stone.wrapS = stone.wrapT = THREE.RepeatWrapping; stone.repeat.set(24, 1.5);
+  const wall = new THREE.Mesh(new THREE.CylinderGeometry(ARENA_R + 1, ARENA_R + 1, 3, 64, 1, true), new THREE.MeshLambertMaterial({ map: stone, side: THREE.BackSide }));
+  wall.position.y = 1.5;
+  scene.add(wall);
+  // Stands rising up behind the wall
+  const standTex = stone.clone(); standTex.repeat.set(30, 1);
+  for (let i = 0; i < 5; i++) {
+    const r = ARENA_R + 1.5 + i * 1.6;
+    const tier = new THREE.Mesh(new THREE.CylinderGeometry(r + 1.6, r + 1.6, 0.8, 64, 1, true), new THREE.MeshLambertMaterial({ map: standTex, side: THREE.BackSide }));
+    tier.position.y = 3 + i * 0.8;
+    scene.add(tier);
+    const top = new THREE.Mesh(new THREE.RingGeometry(r, r + 1.6, 64), new THREE.MeshLambertMaterial({ color: 0xb89a7a, side: THREE.DoubleSide }));
+    top.rotation.x = -Math.PI / 2; top.position.y = 3.4 + i * 0.8;
+    scene.add(top);
+  }
+  // Gate where the knights come in
+  const gate = new THREE.Mesh(new THREE.PlaneGeometry(3, 2.6), new THREE.MeshBasicMaterial({ color: 0x0a0604 }));
+  gate.position.set(0, 1.3, -ARENA_R - 0.9);
+  scene.add(gate);
+  // Banners and torches around the wall
+  const bannerColors = [0xc01a2a, 0x2a4aa0, 0xffc830, 0x3a8a3a];
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + 0.26;
+    const banner = new THREE.Mesh(new THREE.PlaneGeometry(1, 2), new THREE.MeshLambertMaterial({ color: bannerColors[i % 4], side: THREE.DoubleSide }));
+    banner.position.set(Math.sin(a) * (ARENA_R + 0.9), 3.5, Math.cos(a) * (ARENA_R + 0.9));
+    banner.lookAt(0, 3.5, 0);
+    scene.add(banner);
+    if (i % 3 === 0) {
+      const flame = glowSprite(0xffa040, 1.2);
+      flame.position.set(Math.sin(a + 0.26) * (ARENA_R + 0.6), 2.6, Math.cos(a + 0.26) * (ARENA_R + 0.6));
+      scene.add(flame);
+      const l = new THREE.PointLight(0xff9040, 6, 10);
+      l.position.copy(flame.position);
+      scene.add(l);
+    }
+  }
+  // Sunset sky
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(200, 24, 12), new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, depthWrite: false,
+    map: canvasTex(4, 256, (g) => { const grd = g.createLinearGradient(0, 0, 0, 256); grd.addColorStop(0, '#3a2a6a'); grd.addColorStop(0.35, '#c85a6a'); grd.addColorStop(0.5, '#ffb070'); grd.addColorStop(1, '#e8a080'); g.fillStyle = grd; g.fillRect(0, 0, 4, 256); }, false) }));
+  scene.add(sky);
+}
+// The crowd: blocky spectators that bounce when something exciting happens
+const CROWD = 260;
+const crowd = new THREE.InstancedMesh(new THREE.BoxGeometry(0.45, 0.8, 0.35), new THREE.MeshLambertMaterial(), CROWD);
+const crowdBase = [];
+{
+  const colors = [0xc84a3a, 0x3a6ac8, 0xe8c040, 0x4aa04a, 0xa04ac8, 0xe8e0d0, 0x5a3a2a];
+  const m = new THREE.Matrix4(), col = new THREE.Color();
+  for (let i = 0; i < CROWD; i++) {
+    const tierI = i % 5, a = Math.random() * Math.PI * 2;
+    if (Math.abs(Math.sin(a / 2)) < 0.06) continue;   // leave the gate area clear
+    const r = ARENA_R + 2.3 + tierI * 1.6;
+    const pos = new THREE.Vector3(Math.sin(a) * r, 3.8 + tierI * 0.8, Math.cos(a) * r);
+    crowdBase.push({ i, pos, phase: Math.random() * 10 });
+    m.makeTranslation(pos.x, pos.y, pos.z);
+    crowd.setMatrixAt(i, m);
+    crowd.setColorAt(i, col.setHex(colors[i % colors.length]));
+  }
+  crowd.count = CROWD;
+  scene.add(crowd);
+}
+let crowdExcite = 0;
+const tmpM = new THREE.Matrix4();
+function updateCrowd(t) {
+  for (const c of crowdBase) {
+    const hop = Math.max(0, Math.sin(t * (4 + crowdExcite * 6) + c.phase)) * (0.05 + crowdExcite * 0.35);
+    tmpM.makeTranslation(c.pos.x, c.pos.y + hop, c.pos.z);
+    crowd.setMatrixAt(c.i, tmpM);
+  }
+  crowd.instanceMatrix.needsUpdate = true;
+}
+
+// ---------- Sound ----------
+let audio, master;
+function ac() { if (!audio) { audio = new AudioContext(); master = audio.createGain(); master.gain.value = 0.85; master.connect(audio.destination); } return audio; }
+function tone(freq, dur, type = 'sine', vol = 0.1, endFreq = freq, delay = 0) {
+  const a = ac(), t = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(Math.max(1, endFreq), t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(master); o.start(t); o.stop(t + dur + 0.02);
+}
+function noise(dur, type, freq, vol, delay = 0, q = 1, sweepTo = null) {
+  const a = ac(), len = Math.floor(a.sampleRate * dur), t = a.currentTime + delay;
+  const buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = buf; f.type = type; f.frequency.setValueAtTime(freq, t); if (sweepTo) f.frequency.exponentialRampToValueAtTime(sweepTo, t + dur); f.Q.value = q; g.gain.value = vol;
+  src.connect(f).connect(g).connect(master); src.start(t);
+}
+const whoosh = () => noise(0.25, 'bandpass', 600, 0.35, 0, 2, 2400);
+const clang = (high = false) => { for (const f of high ? [1800, 2700, 3900] : [1200, 1900, 2900]) tone(f, 0.5, 'sine', 0.08, f * 0.98); noise(0.12, 'highpass', 3000, 0.3); };
+const thud = () => { noise(0.2, 'lowpass', 500, 0.5); tone(90, 0.2, 'sine', 0.3, 50); };
+const cheer = (big = false) => { noise(big ? 2.5 : 1.2, 'bandpass', 900, big ? 0.35 : 0.18, 0, 0.6); crowdExcite = Math.max(crowdExcite, big ? 1 : 0.6); };
+const ooh = () => { tone(220, 0.8, 'sawtooth', 0.02, 160); noise(0.8, 'bandpass', 500, 0.1, 0, 1); };
+const fanfare = (notes) => notes.forEach((f, i) => { tone(f, 0.3, 'square', 0.08, f, i * 0.16); tone(f / 2, 0.3, 'triangle', 0.08, f / 2, i * 0.16); });
+let crowdLoop = null;
+function startCrowd() {
+  if (crowdLoop) return;
+  const a = ac(), len = a.sampleRate * 3, buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = buf; src.loop = true; f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.5; g.gain.value = 0.04;
+  src.connect(f).connect(g).connect(master); src.start();
+  crowdLoop = g;
+}
+
+// ---------- Sparks ----------
+const sparks = [];
+const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
+function sparkBurst(pos, color = 0xffd060, count = 14, speed = 4) {
+  const m = new THREE.MeshBasicMaterial({ color });
+  for (let i = 0; i < count; i++) {
+    const s = new THREE.Mesh(sparkGeo, m);
+    s.position.copy(pos);
+    s.userData = { vel: new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8, Math.random() - 0.5).normalize().multiplyScalar(speed * (0.5 + Math.random())), life: 0.4 + Math.random() * 0.3 };
+    scene.add(s); sparks.push(s);
+  }
+}
+
+// ---------- Swords ----------
+// Built pointing UP (+Y) from the grip
+function makeSword(bladeColor = 0xd8dce8, glowColor = 0x9ad8ff) {
+  const s = new THREE.Group();
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.95, 0.015), new THREE.MeshStandardMaterial({ color: bladeColor, metalness: 0.9, roughness: 0.2, emissive: glowColor, emissiveIntensity: 0 }));
+  blade.position.y = 0.55;
+  const tipM = new THREE.Mesh(new THREE.ConeGeometry(0.043, 0.12, 4), blade.material);
+  tipM.position.y = 1.08; tipM.rotation.y = Math.PI / 4; tipM.scale.z = 0.25;
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.04, 0.05), new THREE.MeshStandardMaterial({ color: 0xc8a040, metalness: 0.8, roughness: 0.3 }));
+  guard.position.y = 0.06;
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.18, 8), new THREE.MeshStandardMaterial({ color: 0x4a2a14 }));
+  grip.position.y = -0.05;
+  const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), guard.material);
+  pommel.position.y = -0.15;
+  const tip = new THREE.Object3D(); tip.position.y = 1.12;
+  const glow = glowSprite(glowColor, 0.9, 0); glow.position.y = 0.6;
+  s.add(blade, tipM, guard, grip, pommel, tip, glow);
+  s.userData = { blade, tip, glow };
+  return s;
+}
+
+// ---------- Knight (the bots) ----------
+function makeKnight(cfg) {
+  const k = new THREE.Group();
+  const armor = new THREE.MeshStandardMaterial({ color: cfg.armor, metalness: 0.6, roughness: 0.45 });
+  const trim = new THREE.MeshStandardMaterial({ color: cfg.trim, roughness: 0.7 });
+  const helm = new THREE.MeshStandardMaterial({ color: cfg.helm, metalness: 0.7, roughness: 0.35 });
+  const box = (w, h, d, m, parent, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); parent.add(b); return b; };
+  const legs = [-0.13, 0.13].map(x => { const hip = new THREE.Group(); hip.position.set(x, 0.85, 0); k.add(hip); box(0.2, 0.85, 0.24, armor, hip, 0, -0.42, 0); return hip; });
+  const torso = new THREE.Group(); torso.position.y = 0.85; k.add(torso);
+  box(0.56, 0.72, 0.32, armor, torso, 0, 0.38, 0);
+  box(0.58, 0.14, 0.34, trim, torso, 0, 0.02, 0);   // belt
+  box(0.6, 0.5, 0.05, trim, torso, 0, 0.42, 0.17);  // tabard
+  const head = new THREE.Group(); head.position.y = 0.98; torso.add(head);
+  box(0.42, 0.44, 0.42, helm, head, 0, 0.02, 0);
+  box(0.3, 0.05, 0.02, new THREE.MeshBasicMaterial({ color: 0x050505 }), head, 0, 0.06, 0.215);   // visor slit
+  if (cfg.eyes) { const e = new THREE.MeshBasicMaterial({ color: cfg.eyes }); box(0.07, 0.04, 0.02, e, head, -0.08, 0.06, 0.225); box(0.07, 0.04, 0.02, e, head, 0.08, 0.06, 0.225); head.add(glowSprite(cfg.eyes, 0.5, 0.6)); head.children.at(-1).position.set(0, 0.06, 0.25); }
+  box(0.06, 0.18, 0.3, trim, head, 0, 0.3, 0);       // plume
+  // Right arm holds the sword
+  const swordArm = new THREE.Group(); swordArm.position.set(0.36, 0.62, 0); torso.add(swordArm);
+  box(0.16, 0.62, 0.16, armor, swordArm, 0, -0.28, 0);
+  const sword = makeSword(cfg.eyes ? 0x2a2a30 : 0xd8dce8, cfg.eyes ? 0xff2020 : 0xffe060);
+  sword.position.set(0, -0.6, 0.05); sword.rotation.x = Math.PI / 2;
+  swordArm.add(sword);
+  // Left arm holds the shield
+  const shieldArm = new THREE.Group(); shieldArm.position.set(-0.36, 0.62, 0); torso.add(shieldArm);
+  box(0.16, 0.62, 0.16, armor, shieldArm, 0, -0.28, 0);
+  const shield = new THREE.Group(); shield.position.set(-0.05, -0.5, 0.14); shieldArm.add(shield);
+  box(0.5, 0.62, 0.06, new THREE.MeshStandardMaterial({ color: cfg.shield, roughness: 0.6 }), shield, 0, 0, 0);
+  box(0.12, 0.62, 0.065, trim, shield, 0, 0, 0.002); box(0.5, 0.12, 0.065, trim, shield, 0, 0.08, 0.002);
+  k.scale.setScalar(cfg.size);
+  k.userData = { legs, torso, head, swordArm, shieldArm, shield, sword, mats: [armor, helm] };
+  return k;
+}
+
+// ---------- Messages in front of your eyes ----------
+const msgCanvas = document.createElement('canvas'); msgCanvas.width = 1024; msgCanvas.height = 320;
+const msgTex = new THREE.CanvasTexture(msgCanvas);
+const msg = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.5), new THREE.MeshBasicMaterial({ map: msgTex, transparent: true, depthTest: false, fog: false }));
+msg.position.set(0, 0.18, -1.4); msg.renderOrder = 999; msg.visible = false;
+camera.add(msg);
+let msgT = 0;
+function showMessage(title, sub = '', color = '#ffc830', seconds = 2.5) {
+  const g = msgCanvas.getContext('2d');
+  g.clearRect(0, 0, 1024, 320); g.textAlign = 'center'; g.textBaseline = 'middle';
+  let size = 104;
+  do { g.font = `${size}px "Cinzel Decorative", Georgia, serif`; size -= 4; } while (g.measureText(title).width > 960 && size > 20);
+  g.fillStyle = '#000'; g.fillText(title, 518, 126); g.fillStyle = color; g.fillText(title, 512, 120);
+  if (sub) {
+    size = 30;
+    do { g.font = `${size}px "Press Start 2P", monospace`; size -= 2; } while (g.measureText(sub).width > 980 && size > 12);
+    g.fillStyle = '#000'; g.fillText(sub, 515, 243); g.fillStyle = '#fff6e8'; g.fillText(sub, 512, 240);
+  }
+  msgTex.needsUpdate = true; msg.visible = true; msgT = seconds;
+}
+// Small floating word over the knight ("BLOCKED", "PARRY!")
+const popCanvas = document.createElement('canvas'); popCanvas.width = 512; popCanvas.height = 128;
+const popTex = new THREE.CanvasTexture(popCanvas);
+const pop = new THREE.Sprite(new THREE.SpriteMaterial({ map: popTex, transparent: true, depthTest: false }));
+pop.scale.set(1.6, 0.4, 1); pop.renderOrder = 998; pop.visible = false;
+scene.add(pop);
+let popT = 0;
+function popWord(word, color, at) {
+  const g = popCanvas.getContext('2d');
+  g.clearRect(0, 0, 512, 128); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '40px "Press Start 2P", monospace';
+  g.fillStyle = '#000'; g.fillText(word, 260, 68); g.fillStyle = color; g.fillText(word, 256, 64);
+  popTex.needsUpdate = true; pop.visible = true; popT = 0.9;
+  pop.position.copy(at);
+}
+
+// ---------- Player ----------
+const HW = 0.3, PH = 1.8, EYE = 1.62;
+const player = { pos: new THREE.Vector3(0, 0, 6), vel: new THREE.Vector3(), yaw: 0, pitch: 0, onGround: true, walkPhase: 0,
+  hp: PLAYER_HP, blocking: false, blockStart: -9, dashCool: 0, dashT: 0, swingT: -1, swingDir: 0, swingCool: 0, hitDone: false };
+// PC sword in your hand, with poses for idle / block / three swings
+const pcSword = makeSword();
+pcSword.scale.setScalar(0.72);
+camera.add(pcSword);
+const P = (px, py, pz, rx, ry, rz) => ({ p: new THREE.Vector3(px, py, pz), r: new THREE.Vector3(rx, ry, rz) });
+const POSE = {
+  idle:  P(0.3, -0.42, -0.55, -0.55, 0, -0.35),
+  block: P(0.05, -0.2, -0.48, 0, 0, 1.45),
+  swings: [
+    { a: P(0.5, -0.12, -0.45, -0.2, 0, -1.3), b: P(-0.4, -0.38, -0.58, -1.1, 0, 1.2), dmg: 1 },     // right → left
+    { a: P(-0.4, -0.12, -0.45, -0.2, 0, 1.3), b: P(0.45, -0.38, -0.58, -1.1, 0, -1.2), dmg: 1 },    // left → right
+    { a: P(0.12, 0.08, -0.4, 0.65, 0, -0.1), b: P(0.05, -0.5, -0.62, -1.7, 0, -0.1), dmg: 1.35 },  // overhead
+  ],
+};
+const curPose = P(0, 0, 0, 0, 0, 0);
+function applyPose(target, k) {
+  curPose.p.lerp(target.p, k); curPose.r.lerp(target.r, k);
+  pcSword.position.copy(curPose.p); pcSword.rotation.set(curPose.r.x, curPose.r.y, curPose.r.z);
+}
+curPose.p.copy(POSE.idle.p); curPose.r.copy(POSE.idle.r);
+
+// ---------- Game state ----------
+let state = 'intro';   // intro → fighting → roundWon → champion / defeated
+let paused = false, round = 0, stateT = 0, fightT = 0;
+let foe = null, knight = null;
+const $ = id => document.getElementById(id);
+
+function spawnFoe(i) {
+  if (knight) scene.remove(knight);
+  const cfg = FOES[i];
+  knight = makeKnight(cfg);
+  scene.add(knight);
+  foe = { cfg, hp: cfg.hp, pos: new THREE.Vector3(0, 0, -ARENA_R + 0.5), yaw: 0, state: 'intro', t: 0, combo: 0, strafeDir: 1, blockT: 0, flash: 0, hitCool: 0, lungeT: 0, struck: false, deadT: 0 };
+  knight.position.copy(foe.pos);
+}
+function startRound(i) {
+  round = i;
+  spawnFoe(i);
+  player.hp = PLAYER_HP;
+  player.pos.set(0, 0, 5); player.vel.set(0, 0, 0); player.yaw = 0; player.pitch = -0.05;
+  rig.rotation.y = 0;
+  state = 'fighting'; stateT = 0;
+  updateHud();
+  showMessage(`ROUND ${i + 1}`, `${FOES[i].name} · FIGHT!`, ['#7dff6b', '#d8e0f0', '#ff5050'][i], 3);
+  fanfare([392, 523, 659]);
+  cheer();
+}
+function startGame() {
+  $('intro').hidden = true;
+  for (const id of ['round', 'foe', 'you', 'cross']) $(id).hidden = renderer.xr.isPresenting;
+  $('pauseBtn').hidden = false;
+  renderer.domElement.classList.add('playing');
+  try { ac().resume(); } catch (e) {}
+  startCrowd();
+  document.activeElement?.blur();
+  fightT = 0;
+  startRound(0);
+  lockMouse();
+}
+function updateHud() {
+  $('round').textContent = `ROUND ${round + 1}/3`;
+  $('foeName').textContent = foe ? foe.cfg.name : '';
+  $('foeHp').style.width = foe ? Math.max(0, foe.hp / foe.cfg.hp * 100) + '%' : '0%';
+  $('youHp').style.width = Math.max(0, player.hp / PLAYER_HP * 100) + '%';
+}
+const pressWord = () => renderer.xr.isPresenting ? 'trigger' : 'click';
+
+// ---------- Fighting ----------
+const tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3();
+function facingFoeDot() {
+  camera.getWorldDirection(tmpV); tmpV.y = 0; tmpV.normalize();
+  tmpV2.set(foe.pos.x - player.pos.x, 0, foe.pos.z - player.pos.z).normalize();
+  return tmpV.dot(tmpV2);
+}
+const foeChest = () => new THREE.Vector3(foe.pos.x, 1.25 * foe.cfg.size, foe.pos.z);
+
+// You hit the knight (from a PC swing or a VR arm swing)
+function attackFoe(power, at) {
+  if (!foe || foe.state === 'dead' || foe.state === 'intro') return;
+  const canBlock = ['circle', 'approach', 'recover', 'block'].includes(foe.state);
+  if (canBlock && (foe.state === 'block' || Math.random() < foe.cfg.blockChance)) {
+    foe.state = 'block'; foe.t = 0.5;
+    clang(); sparkBurst(at || foeChest(), 0xffe060, 12, 3);
+    popWord('BLOCKED', '#d8e0f0', foeChest().add(new THREE.Vector3(0, 0.9, 0)));
+    return;
+  }
+  const staggered = foe.state === 'stagger';
+  const dmg = Math.round(SWORD_DAMAGE * power * (staggered ? 1.5 : 1));
+  foe.hp -= dmg; foe.flash = 0.15;
+  thud(); sparkBurst(at || foeChest(), 0xff5040, 10, 3);
+  if (Math.random() < 0.5) cheer();
+  // Push them back a little
+  tmpV.set(foe.pos.x - player.pos.x, 0, foe.pos.z - player.pos.z).normalize();
+  foe.pos.addScaledVector(tmpV, 0.35);
+  // Weaker knights get knocked out of their attack
+  if ((foe.state === 'windup' || foe.state === 'strike') && Math.random() < foe.cfg.interrupt) { foe.state = 'recover'; foe.t = foe.cfg.recover * 0.6; }
+  if (foe.hp <= 0) foeDefeated();
+  updateHud();
+}
+function foeDefeated() {
+  foe.hp = 0; foe.state = 'dead'; foe.deadT = 0;
+  cheer(true);
+  if (round < 2) {
+    state = 'roundWon'; stateT = 0;
+    showMessage('VICTORY!', `next: ${FOES[round + 1].name}`, '#ffc830', 3.5);
+    fanfare([523, 659, 784, 1047]);
+  } else {
+    state = 'champion'; stateT = 0;
+    showMessage('CHAMPION!', `you defeated all 3 knights in ${Math.round(fightT)}s · ${pressWord()} to play again`, '#ffc830', Infinity);
+    fanfare([523, 523, 523, 659, 784, 659, 784, 1047]);
+  }
+}
+
+// The knight's strike reaches you
+function foeStrikeLands() {
+  if (state !== 'fighting') return;
+  const d = Math.hypot(foe.pos.x - player.pos.x, foe.pos.z - player.pos.z);
+  if (d > 2.4 * foe.cfg.size) { whoosh(); return; }   // missed: you dodged out of range
+  let blocked = false, parried = false;
+  if (renderer.xr.isPresenting) {
+    // VR: blocked if your blade is in the way of their sword tip
+    const theirTip = knight.userData.sword.userData.tip.getWorldPosition(new THREE.Vector3());
+    const dist = distToSegment(theirTip, vrBladeBase, vrBladeTip);
+    blocked = dist < 0.4;
+    parried = blocked && vrBladeSpeed > 1.5;
+  } else if (player.blocking && facingFoeDot() > 0.35) {
+    blocked = true;
+    parried = (performance.now() / 1000 - player.blockStart) < PARRY_WINDOW;
+  }
+  if (parried) {
+    foe.state = 'stagger'; foe.t = 1.2;
+    clang(true); sparkBurst(foeChest().add(new THREE.Vector3(0, 0.3, 0)), 0xffffff, 24, 5);
+    popWord('PARRY!', '#ffc830', foeChest().add(new THREE.Vector3(0, 0.9, 0)));
+    cheer();
+    haptic(0.8, 120);
+    return;
+  }
+  if (blocked) {
+    clang(); sparkBurst(camera.getWorldPosition(new THREE.Vector3()).add(tmpV.set(0, -0.2, 0)).addScaledVector(camera.getWorldDirection(tmpV2), 0.6), 0xffe060, 10, 3);
+    tmpV.set(player.pos.x - foe.pos.x, 0, player.pos.z - foe.pos.z).normalize();
+    player.vel.addScaledVector(tmpV, 3);
+    haptic(0.4, 80);
+    return;
+  }
+  // Ouch!
+  player.hp -= foe.cfg.damage;
+  tmpV.set(player.pos.x - foe.pos.x, 0, player.pos.z - foe.pos.z).normalize();
+  player.vel.addScaledVector(tmpV, 5); player.vel.y = 3;
+  thud(); ooh();
+  $('hurt').style.transition = 'none'; $('hurt').style.opacity = '1';
+  requestAnimationFrame(() => { $('hurt').style.transition = 'opacity .6s'; $('hurt').style.opacity = '0'; });
+  haptic(1, 250);
+  updateHud();
+  if (player.hp <= 0) {
+    player.hp = 0;
+    state = 'defeated'; stateT = 0;
+    showMessage('DEFEATED', `${pressWord()} to try ${FOES[round].name} again`, '#ff3d4d', Infinity);
+    tone(300, 1.2, 'sawtooth', 0.08, 120);
+    updateHud();
+  }
+}
+function distToSegment(p, a, b) {
+  const ab = tmpV.copy(b).sub(a), ap = tmpV2.copy(p).sub(a);
+  const t = THREE.MathUtils.clamp(ap.dot(ab) / Math.max(1e-6, ab.lengthSq()), 0, 1);
+  return a.clone().addScaledVector(b.clone().sub(a), t).distanceTo(p);
+}
+
+// The knight's brain
+function updateFoe(dt) {
+  const f = foe, cfg = f.cfg, u = knight.userData;
+  f.t -= dt; f.hitCool -= dt;
+  const toP = new THREE.Vector3(player.pos.x - f.pos.x, 0, player.pos.z - f.pos.z);
+  const d = toP.length(); toP.normalize();
+  const wantYaw = Math.atan2(toP.x, toP.z);
+  let dy = wantYaw - f.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  if (f.state !== 'dead') f.yaw += dy * Math.min(1, dt * (f.state === 'windup' ? 4 : 8));
+  const side = new THREE.Vector3(toP.z, 0, -toP.x);
+  let move = 0, strafe = 0;
+  // Arm poses (blended each frame)
+  let swordX = -0.5, swordZ = 0.2, shieldX = -0.3, glow = 0;
+  const keep = 1.7 * cfg.size;
+
+  switch (f.state) {
+    case 'intro':   // walks in through the gate
+      move = 1;
+      if (d < 6 || f.pos.z > -4) { f.state = 'approach'; }
+      break;
+    case 'approach':
+      move = 1;
+      if (d < keep + 0.2) { f.state = 'circle'; f.t = (0.6 + Math.random() * 1.0) * (1.4 - round * 0.25); f.strafeDir = Math.random() < 0.5 ? 1 : -1; }
+      break;
+    case 'circle':
+      strafe = f.strafeDir * cfg.strafe;
+      move = d > keep + 0.3 ? 0.7 : d < keep - 0.3 ? -0.6 : 0;
+      if (Math.random() < dt * 0.6) f.strafeDir *= -1;
+      if (d > 3.5) f.state = 'approach';
+      if (f.t <= 0 && state !== 'fighting') f.t = 1;   // no attacking after the fight is over
+      if (f.t <= 0) {
+        if (d > 2.6 && Math.random() < cfg.lunge) { f.state = 'lunge'; f.t = 0.3; whoosh(); }
+        else { f.state = 'windup'; f.t = cfg.windup; f.combo = cfg.combo; }
+      }
+      break;
+    case 'lunge':   // dash straight at you, then strike
+      f.pos.addScaledVector(toP, 9 * dt);
+      if (f.t <= 0 || d < keep) { f.state = 'windup'; f.t = cfg.windup * 0.5; f.combo = cfg.combo; }
+      break;
+    case 'windup': {   // sword raised and glowing: get ready!
+      const k = 1 - Math.max(0, f.t) / cfg.windup;
+      swordX = -0.5 - k * 2.3; swordZ = 0.2 + (f.combo % 2 ? 0.5 : -0.3) * k; glow = k;
+      move = d > keep ? 0.5 : 0;
+      if (f.t <= 0) { f.state = 'strike'; f.t = 0.28; f.struck = false; whoosh(); }
+      break;
+    }
+    case 'strike': {
+      const k = 1 - Math.max(0, f.t) / 0.28;
+      swordX = -2.8 + k * 2.6; swordZ = (f.combo % 2 ? 0.7 : -0.5) * (1 - k); glow = 1 - k;
+      move = 0.6;
+      if (!f.struck && k > 0.45) { f.struck = true; foeStrikeLands(); }
+      if (f.t <= 0 && f.state === 'strike') {
+        f.combo--;
+        if (f.combo > 0) { f.state = 'windup'; f.t = cfg.windup * 0.55; }
+        else { f.state = 'recover'; f.t = cfg.recover; }
+      }
+      break;
+    }
+    case 'recover':
+      move = d < keep + 1 ? -0.5 : 0;
+      if (f.t <= 0) { f.state = 'circle'; f.t = (0.5 + Math.random()) * (1.3 - round * 0.25); }
+      break;
+    case 'block':
+      shieldX = -1.5; move = -0.2;
+      if (f.t <= 0) { f.state = 'circle'; f.t = 0.3 + Math.random() * 0.5; }
+      break;
+    case 'stagger':   // wide open after a parry!
+      swordX = 0.3; shieldX = 0.2;
+      knight.rotation.z = Math.sin(performance.now() / 70) * 0.06;
+      if (f.t <= 0) { knight.rotation.z = 0; f.state = 'recover'; f.t = 0.4; }
+      break;
+    case 'dead':
+      f.deadT += dt;
+      knight.rotation.x = -Math.min(1, f.deadT / 0.6) * Math.PI / 2;
+      swordX = 0; shieldX = 0;
+      break;
+  }
+  if (f.state !== 'stagger' && f.state !== 'dead') knight.rotation.z = 0;
+  // Move (never walk through you, never leave the arena)
+  const sp = cfg.speed;
+  f.pos.addScaledVector(toP, move * sp * dt).addScaledVector(side, strafe * sp * 0.6 * dt);
+  if (f.state !== 'dead' && d < 0.9) f.pos.addScaledVector(toP, -(0.9 - d));
+  const r = Math.hypot(f.pos.x, f.pos.z);
+  if (r > ARENA_R - 0.6 && f.state !== 'intro') f.pos.multiplyScalar((ARENA_R - 0.6) / r);
+  knight.position.copy(f.pos);
+  knight.rotation.y = f.yaw;
+  // Animate
+  const walking = Math.abs(move) + Math.abs(strafe) > 0.1 && f.state !== 'dead';
+  const ph = performance.now() / 1000 * sp * 3.5;
+  u.legs[0].rotation.x = walking ? Math.sin(ph) * 0.5 : 0;
+  u.legs[1].rotation.x = walking ? -Math.sin(ph) * 0.5 : 0;
+  u.swordArm.rotation.x += (swordX - u.swordArm.rotation.x) * Math.min(1, dt * 14);
+  u.swordArm.rotation.z += (swordZ - u.swordArm.rotation.z) * Math.min(1, dt * 14);
+  u.shieldArm.rotation.x += (shieldX - u.shieldArm.rotation.x) * Math.min(1, dt * 12);
+  u.shield.rotation.x = -u.shieldArm.rotation.x;   // keep the shield's face pointed at you
+  const sw = u.sword.userData;
+  sw.blade.material.emissiveIntensity = glow * 1.5;
+  sw.glow.material.opacity = glow * 0.9;
+  // Flash when hit
+  f.flash -= dt;
+  for (const m of u.mats) m.emissive.setHex(f.flash > 0 ? 0x661010 : 0x000000);
+}
+
+// ---------- Looking around with the mouse ----------
+let locked = false, freeLook = false, mouseX = null;
+function lockMouse() {
+  if (renderer.xr.isPresenting) return;
+  const el = renderer.domElement;
+  const plainLock = () => { try { const p = el.requestPointerLock(); if (p && p.catch) p.catch(() => useFreeLook()); } catch (e) { useFreeLook(); } };
+  try {
+    const p = el.requestPointerLock({ unadjustedMovement: true });
+    if (p && p.catch) p.catch(err => (err && err.name === 'NotSupportedError') ? plainLock() : useFreeLook());
+  } catch (e) { plainLock(); }
+}
+function useFreeLook() {
+  if (freeLook) return;
+  freeLook = true;
+  $('tip').textContent = 'MOVE THE MOUSE TO LOOK · PUSH IT TO THE SCREEN EDGE TO KEEP TURNING';
+  $('tip').hidden = false;
+  setTimeout(() => { $('tip').hidden = true; }, 6000);
+}
+const playing = () => state !== 'intro' && !paused;
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (!locked && !freeLook && state !== 'intro' && !paused && !renderer.xr.isPresenting) setPaused(true);
+});
+addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  if (!locked && !(freeLook && playing())) return;
+  const k = radiansPerPixel();
+  player.yaw -= e.movementX * k;
+  player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * k, -Math.PI / 2, Math.PI / 2);
+});
+document.documentElement.addEventListener('mouseleave', e => {
+  const x = e.clientX ?? mouseX ?? innerWidth / 2;
+  mouseX = x <= innerWidth * 0.15 ? 0 : x >= innerWidth * 0.85 ? innerWidth : null;
+});
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+renderer.domElement.addEventListener('mousedown', e => {
+  if (renderer.xr.isPresenting || state === 'intro' || paused) return;
+  if (state === 'champion' && stateT > 1.5) { fightT = 0; startRound(0); return; }
+  if (state === 'defeated' && stateT > 1.5) { startRound(round); return; }
+  if (!locked && !freeLook) { lockMouse(); return; }
+  if (e.button === 0) startSwing();
+  if (e.button === 2) { player.blocking = true; player.blockStart = performance.now() / 1000; }
+});
+addEventListener('mouseup', e => { if (e.button === 2) player.blocking = false; });
+function startSwing() {
+  if (state !== 'fighting' || player.swingCool > 0 || player.blocking) return;
+  player.swingT = 0; player.hitDone = false;
+  player.swingDir = (player.swingDir + 1) % 3;
+  player.swingCool = 0.45;
+  whoosh();
+}
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.code === 'KeyP' && !e.repeat && state !== 'intro') { setPaused(!paused); if (!paused) lockMouse(); }
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat && playing()) dash();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; player.blocking = false; });
+let dashDir = new THREE.Vector3();
+function dash() {
+  if (player.dashCool > 0 || state !== 'fighting') return;
+  let fx = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), sx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  if (!fx && !sx) fx = -1;   // no direction held: hop backwards
+  const yaw = player.yaw;
+  dashDir.set(-Math.sin(yaw) * fx + Math.cos(yaw) * sx, 0, -Math.cos(yaw) * fx - Math.sin(yaw) * sx).normalize();
+  player.dashT = 0.16; player.dashCool = 0.8;
+  noise(0.2, 'bandpass', 900, 0.25, 0, 1.5, 300);
+}
+function haptic(strength, ms) { for (const c of controllers) c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(strength, ms); }
+
+// ---------- Pause ----------
+const pauseSign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.3), new THREE.MeshBasicMaterial({ transparent: true, depthTest: false,
+  map: canvasTex(768, 256, (g) => { g.fillStyle = 'rgba(30,16,12,0.92)'; g.fillRect(0, 0, 768, 256); g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#ffc830'; g.font = '64px "Press Start 2P", monospace'; g.fillText('PAUSED', 384, 95);
+    g.fillStyle = '#fff'; g.font = '22px "Press Start 2P", monospace'; g.fillText('X: resume   Y: arcade', 384, 190); }, false) }));
+pauseSign.position.set(0, 0, -1.2); pauseSign.renderOrder = 1000; pauseSign.visible = false;
+camera.add(pauseSign);
+function setPaused(p) {
+  if (state === 'intro') return;
+  paused = p; player.blocking = false;
+  $('pauseMenu').hidden = !p || renderer.xr.isPresenting;
+  pauseSign.visible = p && renderer.xr.isPresenting;
+  $('pauseBtn').hidden = p;
+  renderer.domElement.classList.toggle('playing', !p);
+  if (audio) p ? audio.suspend() : audio.resume();
+  if (p && document.pointerLockElement) document.exitPointerLock();
+}
+$('pauseBtn').addEventListener('click', () => setPaused(true));
+$('sens').value = Math.round(mcSensitivity * 200);
+$('sensVal').textContent = $('sens').value + '%';
+$('sens').addEventListener('input', () => {
+  mcSensitivity = $('sens').value / 200;
+  $('sensVal').textContent = $('sens').value + '%';
+  try { localStorage.setItem('mcSensitivity', String(mcSensitivity)); } catch (e) {}
+});
+$('resumeBtn').addEventListener('click', () => { setPaused(false); document.activeElement?.blur(); lockMouse(); });
+$('restartBtn').addEventListener('click', () => { setPaused(false); fightT = 0; startRound(0); document.activeElement?.blur(); lockMouse(); });
+function cantSwitchPagesNotice() {
+  if (location.protocol !== 'file:') return;
+  const n = document.createElement('div');
+  n.textContent = "This viewer can't switch pages. Play the arcade at http://localhost:8124 (or your GitHub link) and Back to Arcade will work.";
+  n.style.cssText = 'position:fixed;left:50%;top:60px;transform:translateX(-50%);max-width:90vw;background:rgba(0,0,0,.85);color:#fff;padding:12px 16px;font:13px system-ui,sans-serif;z-index:99;border:2px solid #ffd23d;border-radius:8px;text-align:center';
+  document.body.appendChild(n); setTimeout(() => n.remove(), 7000);
+}
+function goToArcade() {
+  const go = () => { location.href = 'index.html'; setTimeout(cantSwitchPagesNotice, 700); };
+  if (renderer.xr.isPresenting) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  else go();
+}
+$('arcadeBtn').addEventListener('click', goToArcade);
+$('playBtn').addEventListener('click', startGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden && state !== 'intro') setPaused(true); });
+
+// ---------- VR: a real sword in your right hand ----------
+const controllers = [];
+let rightHand = null, snapReady = true;
+const vrSword = makeSword();
+vrSword.rotation.x = -Math.PI / 2 + 0.6;   // blade points forward and a little up from your fist
+vrSword.visible = false;
+const vrBladeBase = new THREE.Vector3(), vrBladeTip = new THREE.Vector3(), lastTip = new THREE.Vector3();
+let vrBladeSpeed = 0;
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.addEventListener('connected', e => { c.userData.input = e.data; if (e.data.handedness === 'right') { rightHand = c; c.add(vrSword); } });
+  c.addEventListener('disconnected', () => { c.userData.input = null; });
+  c.addEventListener('selectstart', () => {
+    if (state === 'champion' && stateT > 1.5) { fightT = 0; startRound(0); }
+    else if (state === 'defeated' && stateT > 1.5) startRound(round);
+  });
+  rig.add(c);
+  controllers.push(c);
+}
+renderer.xr.addEventListener('sessionstart', () => {
+  for (const id of ['round', 'foe', 'you', 'cross']) $(id).hidden = true;
+  pcSword.visible = false; vrSword.visible = true;
+  if (state === 'intro') startGame();
+  const s = renderer.xr.getSession();
+  s.addEventListener('visibilitychange', () => { if (s.visibilityState !== 'visible') setPaused(true); });
+});
+renderer.xr.addEventListener('sessionend', () => {
+  pcSword.visible = true; vrSword.visible = false;
+  for (const id of ['round', 'foe', 'you', 'cross']) $(id).hidden = state === 'intro';
+  if (state !== 'intro') setPaused(true);
+});
+function readVR() {
+  const out = { fx: 0, sx: 0, jump: false };
+  for (const c of controllers) {
+    const src = c.userData.input, pad = src?.gamepad;
+    if (!pad) continue;
+    const ax = pad.axes;
+    if (src.handedness === 'left' && ax.length >= 4) {
+      out.sx = ax[2]; out.fx = -ax[3];
+      const x = !!pad.buttons[4]?.pressed;
+      if (x && !c.userData.xWas) setPaused(!paused);
+      c.userData.xWas = x;
+      if (paused && pad.buttons[5]?.pressed) goToArcade();
+    }
+    if (src.handedness === 'right' && ax.length >= 4) {
+      if (pad.buttons[4]?.pressed) out.jump = true;
+      if (Math.abs(ax[2]) > 0.7 && snapReady) { rig.rotation.y -= Math.sign(ax[2]) * Math.PI / 6; snapReady = false; }
+      if (Math.abs(ax[2]) < 0.3) snapReady = true;
+    }
+  }
+  return out;
+}
+// VR hits: your real swing has to be fast and the blade has to pass through the knight
+function vrSwordCheck(dt) {
+  if (!rightHand) return;
+  vrSword.getWorldPosition(vrBladeBase);
+  vrSword.userData.tip.getWorldPosition(vrBladeTip);
+  vrBladeSpeed = lastTip.lengthSq() ? vrBladeTip.distanceTo(lastTip) / Math.max(dt, 1e-3) : 0;
+  lastTip.copy(vrBladeTip);
+  if (!foe || state !== 'fighting' || foe.hitCool > 0) return;
+  const c = foeChest();
+  const r = 0.5 * foe.cfg.size;
+  if (vrBladeSpeed > 2.2 && (distToSegment(c, vrBladeBase, vrBladeTip) < r || distToSegment(c.clone().setY(c.y + 0.5), vrBladeBase, vrBladeTip) < r * 0.8)) {
+    foe.hitCool = 0.4;
+    attackFoe(THREE.MathUtils.clamp(vrBladeSpeed / 4, 0.7, 1.7), vrBladeTip.clone());
+    haptic(0.7, 60);
+  }
+}
+
+// ---------- Main loop ----------
+const clock = new THREE.Clock();
+const fwd = new THREE.Vector3(), right = new THREE.Vector3();
+startCrowd.started = false;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  const inVR = renderer.xr.isPresenting;
+
+  crowdExcite = Math.max(0, crowdExcite - dt * 0.5);
+  updateCrowd(t);
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i]; s.userData.vel.y -= 12 * dt; s.position.addScaledVector(s.userData.vel, dt); s.userData.life -= dt;
+    if (s.userData.life <= 0) { scene.remove(s); sparks.splice(i, 1); }
+  }
+  if (msgT !== Infinity) { msgT -= dt; if (msgT <= 0) msg.visible = false; }
+  popT -= dt; pop.visible = popT > 0; if (pop.visible) pop.position.y += dt * 0.4;
+
+  const vr = inVR ? readVR() : null;
+
+  if (state === 'intro') {
+    player.pos.set(Math.sin(t * 0.1) * 8, 2, Math.cos(t * 0.1) * 8);
+    player.yaw = t * 0.1; player.pitch = -0.12;
+  } else if (!paused) {
+    stateT += dt;
+    if (state === 'fighting') fightT += dt;
+    player.swingCool -= dt; player.dashCool -= dt;
+
+    // Movement
+    let fx = 0, sx = 0, jump = false;
+    if (inVR) ({ fx, sx, jump } = vr);
+    else {
+      if (keys.KeyW) fx += 1; if (keys.KeyS) fx -= 1;
+      if (keys.KeyD) sx += 1; if (keys.KeyA) sx -= 1;
+      jump = !!keys.Space;
+      if (keys.ArrowLeft) player.yaw += 2.2 * dt;
+      if (keys.ArrowRight) player.yaw -= 2.2 * dt;
+      if (keys.ArrowUp) player.pitch = Math.min(1.55, player.pitch + 1.6 * dt);
+      if (keys.ArrowDown) player.pitch = Math.max(-1.55, player.pitch - 1.6 * dt);
+      if (freeLook && mouseX !== null) {
+        const edge = innerWidth * 0.08;
+        if (mouseX < edge) player.yaw += EDGE_TURN_SPEED * dt * (1 - mouseX / edge);
+        else if (mouseX > innerWidth - edge) player.yaw -= EDGE_TURN_SPEED * dt * (1 - (innerWidth - mouseX) / edge);
+      }
+    }
+    let yaw = player.yaw;
+    if (inVR) { camera.getWorldDirection(tmpV); yaw = Math.atan2(-tmpV.x, -tmpV.z); }
+    fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    const wish = new THREE.Vector3().addScaledVector(fwd, fx).addScaledVector(right, sx);
+    if (wish.lengthSq() > 1) wish.normalize();
+    const speed = WALK_SPEED * (player.blocking ? 0.5 : 1);
+    const k = Math.min(1, (player.onGround ? 14 : 4) * dt);
+    if (player.dashT > 0) { player.dashT -= dt; player.vel.x = dashDir.x * 11; player.vel.z = dashDir.z * 11; }
+    else { player.vel.x += (wish.x * speed - player.vel.x) * k; player.vel.z += (wish.z * speed - player.vel.z) * k; }
+    if (jump && player.onGround) { player.vel.y = JUMP_SPEED; player.onGround = false; }
+    player.vel.y -= GRAVITY * dt;
+    player.pos.addScaledVector(player.vel, dt);
+    if (player.pos.y <= 0) { player.pos.y = 0; player.vel.y = 0; player.onGround = true; }
+    const r = Math.hypot(player.pos.x, player.pos.z);
+    if (r > ARENA_R - 0.5) { player.pos.x *= (ARENA_R - 0.5) / r; player.pos.z *= (ARENA_R - 0.5) / r; }
+    const hs = Math.hypot(player.vel.x, player.vel.z);
+    if (player.onGround && hs > 0.5) {
+      const before = Math.sin(player.walkPhase);
+      player.walkPhase += dt * hs * 2.2;
+      if (before < 0 && Math.sin(player.walkPhase) >= 0) noise(0.06, 'bandpass', 500 + Math.random() * 200, 0.05);
+    }
+
+    // The knight
+    if (foe) {
+      updateFoe(dt);
+      if (state === 'roundWon' && stateT > 3.5) startRound(round + 1);
+    }
+
+    // PC sword: swinging, blocking, idle
+    if (!inVR) {
+      if (player.swingT >= 0) {
+        player.swingT += dt;
+        const s = POSE.swings[player.swingDir];
+        if (player.swingT < 0.08) applyPose(s.a, Math.min(1, dt * 30));
+        else if (player.swingT < 0.26) {
+          applyPose(s.b, Math.min(1, dt * 22));
+          // The hit lands partway through the swing
+          if (!player.hitDone && player.swingT > 0.14) {
+            player.hitDone = true;
+            const d = Math.hypot(foe.pos.x - player.pos.x, foe.pos.z - player.pos.z);
+            if (d < 2.5 * foe.cfg.size && facingFoeDot() > 0.55) attackFoe(s.dmg, foeChest().addScaledVector(fwd, -0.3));
+          }
+        } else if (player.swingT < 0.42) applyPose(POSE.idle, Math.min(1, dt * 12));
+        else player.swingT = -1;
+      } else if (player.blocking) applyPose(POSE.block, Math.min(1, dt * 18));
+      else {
+        applyPose(POSE.idle, Math.min(1, dt * 10));
+        pcSword.position.y += Math.sin(player.walkPhase * 2) * 0.012 * Math.min(1, hs / 4);
+      }
+    } else vrSwordCheck(dt);
+  }
+
+  // Camera
+  rig.position.copy(player.pos);
+  if (!inVR) {
+    const bob = player.onGround ? Math.sin(player.walkPhase * 2) * 0.03 * Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 4) : 0;
+    camera.position.set(0, EYE + bob, 0);
+    camera.rotation.set(player.pitch, player.yaw, 0);
+    pcSword.visible = state !== 'intro';
+  }
+  pauseSign.visible = paused && inVR;
+  renderer.render(scene, camera);
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

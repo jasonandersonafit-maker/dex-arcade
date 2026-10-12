@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sky Parkour</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  /* Bright daytime sky world: one look on purpose. */
+  :root { --bg:#7ec0ff; --fg:#ffffff; --muted:#d8e6ff; --gold:#ffd23d; --cyan:#33f0ff; --panel:rgba(16,24,48,.88); color-scheme: dark; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden;
+               font-family:'Press Start 2P', ui-monospace, monospace; }
+  [hidden] { display:none !important; }
+  canvas { display:block; }
+  canvas.playing { cursor:none; }
+  #hud { position:fixed; left:16px; top:16px; display:flex; flex-direction:column; gap:8px; font-size:10px;
+         text-shadow:2px 2px 0 #000; pointer-events:none; font-variant-numeric:tabular-nums; }
+  #hud .best { color:var(--gold); }
+  #cross { position:fixed; left:50%; top:50%; width:18px; height:18px; margin:-9px 0 0 -9px; pointer-events:none; }
+  #cross::before, #cross::after { content:''; position:absolute; background:#fff; mix-blend-mode:difference; }
+  #cross::before { left:8px; top:0; width:2px; height:18px; }
+  #cross::after { top:8px; left:0; width:18px; height:2px; }
+  #tip { position:fixed; left:0; right:0; bottom:80px; text-align:center; font-size:9px; color:var(--fg); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
+  .overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(10,20,40,.45); padding:16px; }
+  .card { background:var(--panel); border:3px solid #000; outline:3px solid #4a6aa0; padding:24px; max-width:540px;
+          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7; }
+  .card h1 { margin:0; font-size:clamp(20px, 5vw, 32px); color:var(--cyan); text-shadow:3px 3px 0 #0a3a6a; }
+  .card h2 { margin:0; font-size:22px; color:var(--cyan); }
+  .card p { margin:0; font-size:10px; color:var(--muted); }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:12px; text-align:left; font-size:8px; color:var(--muted); }
+  .controls b { color:var(--fg); display:block; margin-bottom:4px; }
+  @media (max-width: 520px) { .controls { grid-template-columns:1fr; } }
+  button.mc { font:inherit; font-size:12px; color:#fff; background:#6b6b6b; border:3px solid #000;
+              box-shadow: inset -3px -3px 0 #3a3a3a, inset 3px 3px 0 #a8a8a8; padding:12px 16px; cursor:pointer; text-shadow:2px 2px 0 #333; }
+  button.mc:hover, button.mc:focus-visible { background:#7a8ad8; outline:none; }
+  .sens { display:flex; flex-direction:column; gap:8px; font-size:9px; color:var(--muted); }
+  .sens input { width:100%; accent-color:#7a8ad8; }
+  a.back { font-size:9px; color:var(--muted); }
+  #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
+</style>
+</head>
+<body>
+<div id="hud" hidden>
+  <div>TIME <span id="time">0:00.0</span></div>
+  <div>FALLS <span id="falls">0</span> · CHECKPOINT <span id="cp">0</span>/<span id="cpTotal">0</span></div>
+  <div class="best" id="best"></div>
+</div>
+<div id="cross" hidden></div>
+<div id="tip" hidden></div>
+<button id="pauseBtn" class="mc" type="button" hidden>❚❚ PAUSE</button>
+
+<div id="intro" class="overlay">
+  <div class="card">
+    <h1>SKY PARKOUR</h1>
+    <p>Jump your way across a floating block course high above the clouds. Gold blocks are checkpoints, green slime bounces you up, and lava sends you back. Reach the diamond platform as fast as you can!</p>
+    <div class="controls">
+      <div><b>PC</b>Mouse: look around<br>W A S D: move<br>Space: jump<br>R: back to checkpoint<br>P: pause</div>
+      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>A: jump<br>B: back to checkpoint<br>X: pause</div>
+    </div>
+    <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
+    <a class="back" href="index.html">← Back to Arcade</a>
+  </div>
+</div>
+
+<div id="pauseMenu" class="overlay" hidden>
+  <div class="card">
+    <h2>PAUSED</h2>
+    <button id="resumeBtn" class="mc" type="button">Resume</button>
+    <label class="sens" for="sens">MOUSE SENSITIVITY: <span id="sensVal">100%</span>
+      <input id="sens" type="range" min="0" max="200" step="1" value="100">
+    </label>
+    <button id="restartBtn" class="mc" type="button">Restart Course</button>
+    <button id="arcadeBtn" class="mc" type="button">Back to Arcade</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+// ---------- Settings you can tweak (movement matches King's Chase) ----------
+const WALK_SPEED = 4.3;          // blocks per second (Minecraft walking speed, no sprint)
+const JUMP_SPEED = 8.4;          // jumps about 1.25 blocks high
+const GRAVITY = 28;
+const SLIME_BOUNCE = 14;         // how high slime blocks launch you (about 3.5 blocks)
+// Mouse turning uses Minecraft's exact formula. Sensitivity 0.5 is Minecraft's default ("100%"),
+// which turns you 0.15 degrees per pixel of mouse movement. Change it in the pause menu.
+let mcSensitivity = 0.5;
+try { const s = parseFloat(localStorage.getItem('mcSensitivity')); if (s >= 0 && s <= 1) mcSensitivity = s; } catch (e) {}
+function radiansPerPixel() {
+  const f = mcSensitivity * 0.6 + 0.2;
+  return f * f * f * 8 * 0.15 * Math.PI / 180;
+}
+const EDGE_TURN_SPEED = 2.4;     // turning speed when the cursor is at the screen edge (when the mouse can't be captured)
+
+// ---------- Basic setup ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+const scene = new THREE.Scene();
+const FOG = new THREE.Color(0xbfe0ff);
+scene.background = FOG.clone();
+scene.fog = new THREE.Fog(FOG, 40, 120);
+
+const rig = new THREE.Group();
+scene.add(rig);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 300);   // Minecraft's default field of view
+camera.rotation.order = 'YXZ';
+rig.add(camera);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8aa0c8, 1.7));
+const sunLight = new THREE.DirectionalLight(0xfff4d8, 1.6);
+sunLight.position.set(30, 60, 20);
+scene.add(sunLight);
+
+function rng(seed) {
+  return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+
+// ---------- Pixel-art block textures ----------
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => Math.max(0, Math.min(255, Math.round(v * f))));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+function pixTex(seed, draw) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  draw(c.getContext('2d'), rng(seed));
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const speckle = (g, r, base, vary) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { g.fillStyle = shade(base, 1 + (r() - 0.5) * vary); g.fillRect(x, y, 1, 1); } };
+const border = (g, color) => { g.strokeStyle = color; g.lineWidth = 1; g.strokeRect(0.5, 0.5, 15, 15); };
+const TEX = {
+  grassTop: pixTex(1, (g, r) => speckle(g, r, '#5fae3c', 0.35)),
+  grassSide: pixTex(2, (g, r) => {
+    speckle(g, r, '#7a5434', 0.35);
+    for (let x = 0; x < 16; x++) { const d = 3 + (r() * 2 | 0); for (let y = 0; y < d; y++) { g.fillStyle = shade('#5fae3c', 1 + (r() - 0.5) * 0.3); g.fillRect(x, y, 1, 1); } }
+  }),
+  dirt: pixTex(3, (g, r) => speckle(g, r, '#7a5434', 0.4)),
+  stone: pixTex(4, (g, r) => { speckle(g, r, '#8a8a8a', 0.3); g.fillStyle = '#6a6a6a'; for (let i = 0; i < 6; i++) g.fillRect(r() * 14 | 0, r() * 14 | 0, 2, 1); }),
+  plank: pixTex(5, (g, r) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { g.fillStyle = shade(y % 4 === 3 ? '#7a5a30' : '#b8884e', 1 + (r() - 0.5) * 0.15); g.fillRect(x, y, 1, 1); } g.fillStyle = '#7a5a30'; g.fillRect(5, 0, 1, 4); g.fillRect(11, 4, 1, 4); g.fillRect(3, 8, 1, 4); g.fillRect(13, 12, 1, 4); }),
+  quartz: pixTex(6, (g, r) => { speckle(g, r, '#f0ece4', 0.08); border(g, '#d8d2c6'); }),
+  slime: pixTex(7, (g, r) => { speckle(g, r, '#7ad04a', 0.2); border(g, '#4a9a2a'); g.fillStyle = '#5ab83a'; g.fillRect(4, 4, 8, 8); g.fillStyle = '#8ae05a'; g.fillRect(5, 5, 6, 6); }),
+  gold: pixTex(8, (g, r) => { speckle(g, r, '#ffd23d', 0.15); border(g, '#c89a10'); g.fillStyle = '#fff4b0'; g.fillRect(2, 2, 3, 1); g.fillRect(2, 2, 1, 3); }),
+  diamond: pixTex(9, (g, r) => { speckle(g, r, '#5ae8e0', 0.15); border(g, '#2aa8a0'); g.fillStyle = '#e0ffff'; for (let i = 0; i < 5; i++) g.fillRect(r() * 14 | 0, r() * 14 | 0, 2, 1); }),
+  lava: pixTex(10, (g, r) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const v = Math.sin(x * 0.8 + r()) + Math.cos(y * 0.6 + r()); g.fillStyle = v > 0.8 ? '#ffe060' : v > -0.3 ? '#ff8a20' : '#d04010'; g.fillRect(x, y, 1, 1); } }),
+};
+TEX.lava.wrapS = TEX.lava.wrapT = THREE.RepeatWrapping;
+const mat = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, ...extra });
+
+// ---------- The course ----------
+const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, PLANK = 4, QUARTZ = 5, SLIME = 6, GOLD = 7, DIAMOND = 8, LAVA = 9;
+const blocks = new Map();
+const key = (x, y, z) => `${x},${y},${z}`;
+const put = (x, y, z, t) => blocks.set(key(x, y, z), t);
+const get = (x, y, z) => blocks.get(key(x, y, z)) || AIR;
+const isSolid = (x, y, z) => { const b = get(x, y, z); return b !== AIR && b !== LAVA; };
+
+// Builds the course by "hopping" from block to block
+const cur = { x: 0, y: 10, z: 0 };
+const checkpoints = [];
+const SECTION_NAMES = [];
+function pad(x, y, z, r, type) { for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) put(x + dx, y, z + dz, type); }
+function hop(dx, dy, dz, type = STONE, r = 0) { cur.x += dx; cur.y += dy; cur.z += dz; pad(cur.x, cur.y, cur.z, r, type); }
+function checkpoint(dz, nextName) {
+  hop(0, 0, dz, GOLD, 1);   // a 3x3 gold platform
+  checkpoints.push({ x: cur.x + 0.5, y: cur.y + 1, z: cur.z + 0.5 });
+  SECTION_NAMES.push(nextName);
+}
+
+// Start island (grass with dirt hanging underneath)
+pad(0, 9, 0, 3, GRASS);
+pad(0, 8, 0, 2, DIRT); pad(0, 7, 0, 1, DIRT); put(0, 6, 0, DIRT);
+checkpoints.push({ x: 0.5, y: 10, z: 0.5 });
+SECTION_NAMES.push('WARM-UP');
+cur.y = 9;
+
+// 1. Warm-up: small gaps on stone
+hop(0, 0, 5); hop(0, 0, 2); hop(0, 0, 2); hop(1, 0, 2); hop(-1, 0, 2); hop(-1, 0, 2); hop(1, 0, 2); hop(0, 0, 3);
+checkpoint(3, 'THE CLIMB');
+
+// 2. The Climb: wooden steps going up
+hop(0, 1, 3, PLANK); hop(0, 1, 2, PLANK); hop(1, 1, 2, PLANK); hop(0, 1, 2, PLANK); hop(-1, 1, 2, PLANK);
+hop(-1, 0, 2, PLANK); hop(0, 1, 2, PLANK); hop(1, 1, 2, PLANK); hop(1, 0, 2, PLANK);
+checkpoint(3, 'LONG JUMPS');
+
+// 3. Long jumps: 2-block gaps on quartz
+hop(0, 0, 4, QUARTZ); hop(0, 0, 3, QUARTZ); hop(0, 0, 3, QUARTZ); hop(1, -1, 3, QUARTZ); hop(-1, 0, 3, QUARTZ);
+hop(2, 0, 2, QUARTZ); hop(0, 1, 3, QUARTZ); hop(-2, 0, 2, QUARTZ);
+checkpoint(3, 'BOUNCE');
+
+// 4. Bounce: slime launches you up to platforms you could never jump to
+hop(0, -2, 4, SLIME); hop(0, 3, 3, QUARTZ, 1);
+hop(0, -2, 4, SLIME); hop(0, 3, 3, QUARTZ, 1);
+hop(2, -3, 3, SLIME); hop(0, 3, 3, PLANK, 1);
+checkpoint(4, 'LAVA FIELD');
+
+// 5. Lava field: stepping stones across lava, then a spiral up to the finish
+{
+  const fy = cur.y, fz = cur.z + 3;
+  for (let dz = 0; dz < 11; dz++) for (let dx = -3; dx <= 3; dx++) put(cur.x + dx, fy, fz + dz, LAVA);
+  const stones = [[0, 0], [1, 2], [-1, 4], [1, 6], [0, 8], [-2, 9], [0, 10]];
+  for (const [sx, sz] of stones) put(cur.x + sx, fy, fz + sz, STONE);
+  cur.z = fz + 10;
+}
+hop(0, 0, 3, STONE);
+hop(2, 1, 0); hop(0, 1, 2); hop(-2, 1, 0); hop(0, 1, -2);   // spiral up
+hop(2, 1, 0); hop(0, 1, 2); hop(-2, 1, 0);
+hop(0, 0, 3);
+// Finish: a diamond platform
+hop(0, 0, 4, DIAMOND, 2);
+const FINISH = { x: cur.x + 0.5, y: cur.y + 1, z: cur.z + 0.5 };
+const COURSE_BOTTOM = 0;
+
+// ---------- Draw the blocks ----------
+const box = new THREE.BoxGeometry(1, 1, 1);
+const MATS = {
+  [GRASS]: [mat(TEX.grassSide), mat(TEX.grassSide), mat(TEX.grassTop), mat(TEX.dirt), mat(TEX.grassSide), mat(TEX.grassSide)],
+  [DIRT]: mat(TEX.dirt), [STONE]: mat(TEX.stone), [PLANK]: mat(TEX.plank), [QUARTZ]: mat(TEX.quartz),
+  [SLIME]: mat(TEX.slime, { transparent: true, opacity: 0.9 }),
+  [GOLD]: mat(TEX.gold, { emissive: 0x403000 }),
+  [DIAMOND]: mat(TEX.diamond, { emissive: 0x104040 }),
+  [LAVA]: new THREE.MeshBasicMaterial({ map: TEX.lava }),
+};
+{
+  const lists = {};
+  for (const [k, t] of blocks) (lists[t] ??= []).push(k.split(',').map(Number));
+  const m4 = new THREE.Matrix4();
+  for (const t in lists) {
+    const list = lists[t];
+    const mesh = new THREE.InstancedMesh(box, MATS[t], list.length);
+    list.forEach(([x, y, z], i) => {
+      // Lava sits a little lower than a full block, like a liquid
+      if (+t === LAVA) mesh.setMatrixAt(i, m4.makeTranslation(x + 0.5, y + 0.4, z + 0.5).multiply(new THREE.Matrix4().makeScale(1, 0.8, 1)));
+      else mesh.setMatrixAt(i, m4.makeTranslation(x + 0.5, y + 0.5, z + 0.5));
+    });
+    scene.add(mesh);
+  }
+}
+// Glow over the lava
+for (let i = 0; i < 2; i++) {
+  const l = new THREE.PointLight(0xff7020, 12, 10);
+  l.position.set(checkpoints[4].x, checkpoints[4].y + 0.5, checkpoints[4].z + 5 + i * 5);
+  scene.add(l);
+}
+
+// Beacon beams over each checkpoint (turn green once you reach them)
+const beams = checkpoints.slice(1).map(cp => {
+  const b = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 40, 10, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffe060, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  b.position.set(cp.x, cp.y + 20, cp.z);
+  scene.add(b);
+  return b;
+});
+// A big beam over the finish
+const finishBeam = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 60, 12, 1, true),
+  new THREE.MeshBasicMaterial({ color: 0x5ae8e0, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+finishBeam.position.set(FINISH.x, FINISH.y + 30, FINISH.z);
+scene.add(finishBeam);
+
+// ---------- Sky: blue gradient, square sun, clouds above and below ----------
+{
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
+  const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, '#3a7ae0'); grd.addColorStop(0.45, '#7ec0ff'); grd.addColorStop(0.55, '#bfe0ff'); grd.addColorStop(1, '#dcefff');
+  g.fillStyle = grd; g.fillRect(0, 0, 4, 256);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  scene.add(new THREE.Mesh(new THREE.SphereGeometry(250, 24, 12), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })));
+}
+const sun = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshBasicMaterial({ color: 0xfff6c0, fog: false }));
+sun.position.set(60, 140, 160);
+sun.lookAt(0, 20, 40);
+scene.add(sun);
+const clouds = [];
+{
+  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.92 });
+  const cr = rng(11);
+  for (let i = 0; i < 60; i++) {
+    const below = i < 40;   // a sea of clouds under the course
+    const c = new THREE.Mesh(new THREE.BoxGeometry(8 + cr() * 14, 1.5, 6 + cr() * 10), cloudMat);
+    c.position.set(-60 + cr() * 120, below ? -6 + cr() * 4 : 45 + cr() * 6, -40 + cr() * 200);
+    scene.add(c);
+    clouds.push(c);
+  }
+}
+
+// ---------- Sound ----------
+let audio;
+function ac() { return audio ??= new AudioContext(); }
+function beep(freq, dur, type = 'square', vol = 0.12, slide = 0.5) {
+  const a = ac(), o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.value = freq;
+  o.frequency.exponentialRampToValueAtTime(freq * slide, a.currentTime + dur);
+  g.gain.setValueAtTime(vol, a.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur);
+  o.connect(g).connect(a.destination);
+  o.start(); o.stop(a.currentTime + dur);
+}
+function noise(dur, filterType, freq, vol) {
+  const a = ac(), len = Math.floor(a.sampleRate * dur);
+  const buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = buf; f.type = filterType; f.frequency.value = freq; g.gain.value = vol;
+  src.connect(f).connect(g).connect(a.destination);
+  src.start();
+}
+
+// ---------- Particles ----------
+const particles = [];
+const pGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+function burst(pos, color, count = 12, speed = 4, gravity = 14) {
+  const m = new THREE.MeshBasicMaterial({ color });
+  for (let i = 0; i < count; i++) {
+    const p = new THREE.Mesh(pGeo, m);
+    p.position.copy(pos);
+    p.userData.vel = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize().multiplyScalar(speed * (0.5 + Math.random() * 0.5));
+    p.userData.life = 1 + Math.random() * 0.6;
+    p.userData.gravity = gravity;
+    scene.add(p);
+    particles.push(p);
+  }
+}
+
+// ---------- Player (same physics as King's Chase) ----------
+const HW = 0.3, PH = 1.8, EYE = 1.62;
+const player = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: Math.PI, pitch: 0, onGround: false, walkPhase: 0 };
+function collides(px, py, pz) {
+  for (let x = Math.floor(px - HW); x <= Math.floor(px + HW - 1e-6); x++)
+    for (let y = Math.floor(py); y <= Math.floor(py + PH - 1e-6); y++)
+      for (let z = Math.floor(pz - HW); z <= Math.floor(pz + HW - 1e-6); z++)
+        if (isSolid(x, y, z)) return true;
+  return false;
+}
+// Which block types are right under your feet
+function blocksUnderFeet() {
+  const out = new Set(), y = Math.floor(player.pos.y - 0.05);
+  for (let x = Math.floor(player.pos.x - HW); x <= Math.floor(player.pos.x + HW - 1e-6); x++)
+    for (let z = Math.floor(player.pos.z - HW); z <= Math.floor(player.pos.z + HW - 1e-6); z++) out.add(get(x, y, z));
+  return out;
+}
+function moveAxis(axis, amount) {
+  const p = player.pos;
+  p[axis] += amount;
+  if (!collides(p.x, p.y, p.z)) return;
+  if (axis === 'y') {
+    if (amount < 0) {
+      p.y = Math.floor(p.y) + 1;
+      if (blocksUnderFeet().has(SLIME)) {   // boing!
+        player.vel.y = SLIME_BOUNCE;
+        beep(300, 0.25, 'sine', 0.2, 2.5);
+        burst(p.clone(), 0x7ad04a, 8, 3);
+        return;
+      }
+      player.onGround = true;
+    } else p.y = Math.floor(p.y + PH) - PH - 1e-4;
+  } else {
+    p[axis] = amount > 0 ? Math.floor(p[axis] + HW) - HW - 1e-4 : Math.floor(p[axis] - HW) + 1 + HW + 1e-4;
+  }
+  player.vel[axis] = 0;
+}
+// Only counts once you've actually sunk into lava, so standing on a stone at the edge is safe
+function touchingLava() {
+  const x = Math.floor(player.pos.x), z = Math.floor(player.pos.z);
+  for (let y = Math.floor(player.pos.y + 0.01); y <= Math.floor(player.pos.y + 0.5); y++)
+    if (get(x, y, z) === LAVA) return true;
+  return false;
+}
+
+// Arm in the corner (PC)
+const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.5), new THREE.MeshLambertMaterial({ color: 0xe0a878 }));
+arm.position.set(0.32, -0.32, -0.45);
+arm.rotation.set(0.2, -0.25, 0);
+camera.add(arm);
+
+// ---------- Messages in front of your eyes ----------
+const msgCanvas = document.createElement('canvas');
+msgCanvas.width = 1024; msgCanvas.height = 320;
+const msgTex = new THREE.CanvasTexture(msgCanvas);
+const msg = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.5), new THREE.MeshBasicMaterial({ map: msgTex, transparent: true, depthTest: false, fog: false }));
+msg.position.set(0, 0.15, -1.4);
+msg.renderOrder = 999;
+msg.visible = false;
+camera.add(msg);
+let msgT = 0;
+function showMessage(title, sub = '', color = '#33f0ff', seconds = 2.5) {
+  const g = msgCanvas.getContext('2d');
+  g.clearRect(0, 0, 1024, 320);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  let size = 100;
+  do { g.font = `${size}px "Press Start 2P", monospace`; size -= 4; } while (g.measureText(title).width > 960 && size > 20);
+  g.fillStyle = '#000'; g.fillText(title, 518, 128);
+  g.fillStyle = color; g.fillText(title, 512, 122);
+  if (sub) {
+    size = 32;
+    do { g.font = `${size}px "Press Start 2P", monospace`; size -= 2; } while (g.measureText(sub).width > 980 && size > 12);
+    g.fillStyle = '#000'; g.fillText(sub, 515, 243);
+    g.fillStyle = '#fff'; g.fillText(sub, 512, 240);
+  }
+  msgTex.needsUpdate = true;
+  msg.visible = true;
+  msgT = seconds;
+}
+
+// VR status line and pause sign
+const vrHudCanvas = document.createElement('canvas');
+vrHudCanvas.width = 512; vrHudCanvas.height = 64;
+const vrHudTex = new THREE.CanvasTexture(vrHudCanvas);
+const vrHud = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.0625), new THREE.MeshBasicMaterial({ map: vrHudTex, transparent: true, depthTest: false, fog: false }));
+vrHud.position.set(0, -0.32, -1);
+vrHud.renderOrder = 998;
+vrHud.visible = false;
+camera.add(vrHud);
+const pauseSign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.3), new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, fog: false,
+  map: (() => { const c = document.createElement('canvas'); c.width = 768; c.height = 256; const g = c.getContext('2d');
+    g.fillStyle = 'rgba(16,24,48,0.9)'; g.fillRect(0, 0, 768, 256); g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#33f0ff'; g.font = '64px "Press Start 2P", monospace'; g.fillText('PAUSED', 384, 95);
+    g.fillStyle = '#fff'; g.font = '22px "Press Start 2P", monospace'; g.fillText('X: resume   Y: arcade', 384, 190);
+    return new THREE.CanvasTexture(c); })() }));
+pauseSign.position.set(0, 0, -1.2);
+pauseSign.renderOrder = 1000;
+pauseSign.visible = false;
+camera.add(pauseSign);
+
+// ---------- Game state ----------
+let state = 'intro';       // intro → play → done
+let paused = false, timerRunning = false, time = 0, falls = 0, cpIndex = 0, doneT = 0, fireworkT = 0;
+const $ = id => document.getElementById(id);
+const fmt = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+function loadBest() { try { return parseFloat(localStorage.getItem('skyParkourBest')) || null; } catch (e) { return null; } }
+function saveBest(t) { try { localStorage.setItem('skyParkourBest', String(t)); } catch (e) {} }
+let best = loadBest();
+$('cpTotal').textContent = checkpoints.length - 1;
+
+function respawn(countFall) {
+  const cp = checkpoints[cpIndex];
+  player.pos.set(cp.x, cp.y, cp.z);
+  player.vel.set(0, 0, 0);
+  player.yaw = Math.PI; player.pitch = 0;
+  rig.rotation.y = 0;
+  if (countFall) { falls++; beep(160, 0.35, 'sawtooth', 0.12); }
+}
+function startGame() {
+  state = 'play'; paused = false; timerRunning = false; time = 0; falls = 0; cpIndex = 0;
+  beams.forEach(b => b.material.color.set(0xffe060));
+  respawn(false);
+  $('intro').hidden = true;
+  $('hud').hidden = renderer.xr.isPresenting;
+  $('cross').hidden = renderer.xr.isPresenting;
+  $('pauseBtn').hidden = false;
+  renderer.domElement.classList.add('playing');
+  try { ac().resume(); } catch (e) {}
+  document.activeElement?.blur();
+  showMessage('SKY PARKOUR', 'reach the diamond platform!');
+  lockMouse();
+}
+function finish() {
+  state = 'done'; doneT = 0; timerRunning = false;
+  const newBest = best === null || time < best;
+  if (newBest) { best = time; saveBest(time); }
+  showMessage('COURSE COMPLETE!', `${fmt(time)} · ${falls} fall${falls === 1 ? '' : 's'}${newBest ? ' · NEW BEST!' : ''} · ${renderer.xr.isPresenting ? 'trigger' : 'click'} to play again`, '#5ae8e0', Infinity);
+  [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => setTimeout(() => beep(f, 0.25, 'square', 0.1, 1), i * 110));
+}
+
+// ---------- Looking around with the mouse ----------
+let locked = false, freeLook = false;
+let mouseX = null;   // cursor position, used for edge turning when the mouse can't be captured
+function lockMouse() {
+  if (renderer.xr.isPresenting) return;
+  const el = renderer.domElement;
+  const plainLock = () => {
+    try { const p = el.requestPointerLock(); if (p && p.catch) p.catch(() => useFreeLook()); } catch (e) { useFreeLook(); }
+  };
+  // Raw mouse input (no Windows mouse acceleration), the same way Minecraft reads the mouse.
+  // Browsers that don't support raw input fall back to a normal lock.
+  try {
+    const p = el.requestPointerLock({ unadjustedMovement: true });
+    if (p && p.catch) p.catch(err => (err && err.name === 'NotSupportedError') ? plainLock() : useFreeLook());
+  } catch (e) { plainLock(); }
+}
+function useFreeLook() {
+  // This window won't capture the mouse: just moving it still turns your view,
+  // and holding the cursor near the left/right edge keeps you turning.
+  if (freeLook) return;
+  freeLook = true;
+  $('tip').textContent = 'MOVE THE MOUSE TO LOOK · PUSH IT TO THE SCREEN EDGE TO KEEP TURNING';
+  $('tip').hidden = false;
+  setTimeout(() => { $('tip').hidden = true; }, 6000);
+}
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (!locked && !freeLook && state === 'play' && !paused && !renderer.xr.isPresenting) setPaused(true);
+});
+addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  const looking = locked || (freeLook && state !== 'intro' && !paused);
+  if (!looking) return;
+  const k = radiansPerPixel();
+  player.yaw -= e.movementX * k;
+  player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * k, -Math.PI / 2, Math.PI / 2);   // straight up/down, like Minecraft
+});
+// If the cursor slides off the left or right side of the window, keep turning that way until it comes back
+document.documentElement.addEventListener('mouseleave', e => {
+  const x = e.clientX ?? mouseX ?? innerWidth / 2;
+  if (x <= innerWidth * 0.15) mouseX = 0;
+  else if (x >= innerWidth * 0.85) mouseX = innerWidth;
+  else mouseX = null;
+});
+renderer.domElement.addEventListener('mousedown', e => {
+  if (e.button !== 0 || renderer.xr.isPresenting) return;
+  if (state === 'done' && doneT > 1.2) { startGame(); return; }
+  if (!locked && !freeLook && state === 'play' && !paused) lockMouse();
+});
+
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  // P pauses (and unlocks the mouse); P again resumes (and locks it again)
+  if (e.code === 'KeyP' && !e.repeat && state !== 'intro') { setPaused(!paused); if (!paused) lockMouse(); }
+  if (e.code === 'KeyR' && !e.repeat && state === 'play' && !paused) respawn(false);
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+// ---------- Pause ----------
+function setPaused(p) {
+  if (state === 'intro') return;
+  paused = p;
+  $('pauseMenu').hidden = !p || renderer.xr.isPresenting;
+  pauseSign.visible = p && renderer.xr.isPresenting;
+  $('pauseBtn').hidden = p;
+  renderer.domElement.classList.toggle('playing', !p);
+  if (p && document.pointerLockElement) document.exitPointerLock();
+}
+$('pauseBtn').addEventListener('click', () => setPaused(true));
+// Sensitivity slider: 0%–200% like Minecraft's options (100% = Minecraft's default)
+$('sens').value = Math.round(mcSensitivity * 200);
+$('sensVal').textContent = $('sens').value + '%';
+$('sens').addEventListener('input', () => {
+  mcSensitivity = $('sens').value / 200;
+  $('sensVal').textContent = $('sens').value + '%';
+  try { localStorage.setItem('mcSensitivity', String(mcSensitivity)); } catch (e) {}
+});
+$('resumeBtn').addEventListener('click', () => { setPaused(false); document.activeElement?.blur(); lockMouse(); });
+$('restartBtn').addEventListener('click', () => { setPaused(false); startGame(); });
+// The app's file viewer can't switch pages; if the page didn't change, explain where to play instead
+function cantSwitchPagesNotice() {
+  if (location.protocol !== 'file:') return;
+  const n = document.createElement('div');
+  n.textContent = "This viewer can't switch pages. Play the arcade at http://localhost:8124 (or your GitHub link) and Back to Arcade will work.";
+  n.style.cssText = 'position:fixed;left:50%;top:60px;transform:translateX(-50%);max-width:90vw;background:rgba(0,0,0,.85);color:#fff;padding:12px 16px;font:13px system-ui,sans-serif;z-index:99;border:2px solid #ffd23d;border-radius:8px;text-align:center';
+  document.body.appendChild(n);
+  setTimeout(() => n.remove(), 7000);
+}
+function goToArcade() {
+  const go = () => { location.href = 'index.html'; setTimeout(cantSwitchPagesNotice, 700); };
+  if (renderer.xr.isPresenting) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  else go();
+}
+$('arcadeBtn').addEventListener('click', goToArcade);
+$('playBtn').addEventListener('click', startGame);
+document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPaused(true); });
+
+// ---------- VR controllers ----------
+const controllers = [];
+let snapReady = true;
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.addEventListener('connected', e => { c.userData.input = e.data; });
+  c.addEventListener('disconnected', () => { c.userData.input = null; });
+  c.addEventListener('selectstart', () => { if (state === 'done' && doneT > 1.2) startGame(); });
+  rig.add(c);
+  controllers.push(c);
+}
+renderer.xr.addEventListener('sessionstart', () => {
+  $('hud').hidden = true; $('cross').hidden = true; arm.visible = false; vrHud.visible = true;
+  if (state === 'intro') startGame();
+  const session = renderer.xr.getSession();
+  session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible') setPaused(true); });
+});
+renderer.xr.addEventListener('sessionend', () => {
+  arm.visible = true; vrHud.visible = false;
+  if (state !== 'intro') { $('hud').hidden = false; $('cross').hidden = false; if (state === 'play') setPaused(true); }
+});
+function readVR() {
+  const out = { fx: 0, sx: 0, jump: false };
+  for (const c of controllers) {
+    const src = c.userData.input, pad = src?.gamepad;
+    if (!pad) continue;
+    const ax = pad.axes;
+    if (src.handedness === 'left' && ax.length >= 4) {
+      out.sx = ax[2]; out.fx = -ax[3];
+      const x = !!pad.buttons[4]?.pressed;
+      if (x && !c.userData.xWas) setPaused(!paused);
+      c.userData.xWas = x;
+      if (paused && pad.buttons[5]?.pressed) goToArcade();
+    }
+    if (src.handedness === 'right' && ax.length >= 4) {
+      if (pad.buttons[4]?.pressed) out.jump = true;                       // A: jump
+      const b = !!pad.buttons[5]?.pressed;                                // B: back to checkpoint
+      if (b && !c.userData.bWas && state === 'play' && !paused) respawn(false);
+      c.userData.bWas = b;
+      if (Math.abs(ax[2]) > 0.7 && snapReady) { rig.rotation.y -= Math.sign(ax[2]) * Math.PI / 6; snapReady = false; }
+      if (Math.abs(ax[2]) < 0.3) snapReady = true;
+    }
+  }
+  return out;
+}
+
+// ---------- Main loop ----------
+const clock = new THREE.Clock();
+const fwd = new THREE.Vector3(), right = new THREE.Vector3(), tmpV = new THREE.Vector3();
+let hudTimer = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  const inVR = renderer.xr.isPresenting;
+
+  // Scenery
+  TEX.lava.offset.x += dt * 0.08;
+  TEX.lava.offset.y += dt * 0.05;
+  for (const c of clouds) { c.position.x += dt * 1.2; if (c.position.x > 70) c.position.x = -70; }
+  for (const b of beams) b.rotation.y += dt;
+  finishBeam.material.opacity = 0.3 + Math.sin(t * 3) * 0.1;
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.userData.vel.y -= p.userData.gravity * dt;
+    p.position.addScaledVector(p.userData.vel, dt);
+    p.userData.life -= dt;
+    if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+  }
+  if (msgT !== Infinity) { msgT -= dt; if (msgT <= 0) msg.visible = false; }
+
+  const vr = inVR ? readVR() : null;
+
+  if (state === 'intro') {
+    // Slowly circle the start island behind the menu
+    player.pos.set(Math.sin(t * 0.1) * 6, 13, Math.cos(t * 0.1) * 6 - 2);
+    player.yaw = t * 0.1 + Math.PI * 0.15; player.pitch = -0.25;
+  } else if (!paused) {
+    if (state === 'done') doneT += dt;
+
+    // ----- Movement -----
+    let fx = 0, sx = 0, jump = false;
+    if (inVR) ({ fx, sx, jump } = vr);
+    else {
+      if (keys.KeyW) fx += 1; if (keys.KeyS) fx -= 1;
+      if (keys.KeyD) sx += 1; if (keys.KeyA) sx -= 1;
+      jump = !!keys.Space;
+      if (keys.ArrowLeft) player.yaw += 2.2 * dt;
+      if (keys.ArrowRight) player.yaw -= 2.2 * dt;
+      if (keys.ArrowUp) player.pitch = Math.min(1.55, player.pitch + 1.6 * dt);
+      if (keys.ArrowDown) player.pitch = Math.max(-1.55, player.pitch - 1.6 * dt);
+      // Edge turning when the mouse can't be captured
+      if (freeLook && mouseX !== null) {
+        const edge = innerWidth * 0.08;
+        if (mouseX < edge) player.yaw += EDGE_TURN_SPEED * dt * (1 - mouseX / edge);
+        else if (mouseX > innerWidth - edge) player.yaw -= EDGE_TURN_SPEED * dt * (1 - (innerWidth - mouseX) / edge);
+      }
+    }
+    let yaw = player.yaw;
+    if (inVR) { camera.getWorldDirection(tmpV); yaw = Math.atan2(-tmpV.x, -tmpV.z); }
+    fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    const wish = new THREE.Vector3().addScaledVector(fwd, fx).addScaledVector(right, sx);
+    if (wish.lengthSq() > 1) wish.normalize();
+    if (wish.lengthSq() > 0.01 && state === 'play') timerRunning = true;   // clock starts when you first move
+    const accel = player.onGround ? 14 : 4;
+    const k = Math.min(1, accel * dt);
+    player.vel.x += (wish.x * WALK_SPEED - player.vel.x) * k;
+    player.vel.z += (wish.z * WALK_SPEED - player.vel.z) * k;
+    if (jump && player.onGround) { player.vel.y = JUMP_SPEED; player.onGround = false; noise(0.08, 'lowpass', 500, 0.12); timerRunning = state === 'play'; }
+
+    const steps = Math.ceil(dt / 0.008), sdt = dt / steps;
+    for (let s = 0; s < steps; s++) {
+      player.vel.y = Math.max(-40, player.vel.y - GRAVITY * sdt);   // gravity every step, so standing is always detected
+      player.onGround = false;
+      moveAxis('x', player.vel.x * sdt);
+      moveAxis('z', player.vel.z * sdt);
+      moveAxis('y', player.vel.y * sdt);
+    }
+    const hspeed = Math.hypot(player.vel.x, player.vel.z);
+    if (player.onGround && hspeed > 0.5) {
+      const before = Math.sin(player.walkPhase);
+      player.walkPhase += dt * hspeed * 2.2;
+      if (before < 0 && Math.sin(player.walkPhase) >= 0) noise(0.06, 'bandpass', 700 + Math.random() * 300, 0.07);
+    }
+
+    if (state === 'play') {
+      if (timerRunning) time += dt;
+      // Fell off, or touched lava: back to the checkpoint
+      if (player.pos.y < checkpoints[cpIndex].y - 12 || player.pos.y < COURSE_BOTTOM - 4) { respawn(true); showMessage('OOPS!', 'back to the checkpoint', '#ffffff', 1.2); }
+      else if (touchingLava()) { burst(player.pos.clone(), 0xff8a20, 16, 4); respawn(true); showMessage('TOO HOT!', 'lava sends you back', '#ff8a20', 1.4); }
+      // Checkpoints and the finish
+      if (player.onGround) {
+        const under = blocksUnderFeet();
+        if (under.has(GOLD)) {
+          const i = checkpoints.findIndex((cp, n) => n > 0 && Math.abs(cp.x - player.pos.x) < 2 && Math.abs(cp.z - player.pos.z) < 2 && Math.abs(cp.y - player.pos.y) < 1);
+          if (i > cpIndex) {
+            cpIndex = i;
+            beams[i - 1].material.color.set(0x7dff6b);
+            showMessage(`CHECKPOINT ${i}`, 'next: ' + SECTION_NAMES[i], '#ffd23d');
+            [784, 1047, 1319].forEach((f, n) => setTimeout(() => beep(f, 0.15, 'square', 0.1, 1), n * 80));
+            burst(player.pos.clone().add(new THREE.Vector3(0, 1, 0)), 0xffd23d, 20, 4);
+          }
+        }
+        if (under.has(DIAMOND)) finish();
+      }
+    }
+    // Fireworks at the finish
+    if (state === 'done') {
+      fireworkT -= dt;
+      if (fireworkT <= 0) {
+        fireworkT = 0.35;
+        const colors = [0xff3d6b, 0xffd23d, 0x33f0ff, 0x7dff6b, 0xb07dff];
+        burst(new THREE.Vector3(FINISH.x + (Math.random() - 0.5) * 10, FINISH.y + 6 + Math.random() * 6, FINISH.z + (Math.random() - 0.5) * 10),
+          colors[Math.floor(Math.random() * colors.length)], 30, 7, 3);
+        noise(0.3, 'bandpass', 1500, 0.12);
+      }
+    }
+  }
+
+  // Camera at the player's eyes
+  rig.position.copy(player.pos);
+  if (!inVR) {
+    const bob = player.onGround ? Math.sin(player.walkPhase * 2) * 0.04 * Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 4) : 0;
+    camera.position.set(0, EYE + bob, 0);
+    camera.rotation.set(player.pitch, player.yaw, 0);
+    arm.position.y = -0.32 + bob * 0.5;
+    arm.rotation.x = 0.2 + Math.sin(player.walkPhase) * 0.15;
+    arm.visible = state !== 'intro';
+  }
+
+  // HUD
+  hudTimer -= dt;
+  if (hudTimer <= 0 && state !== 'intro') {
+    hudTimer = 0.1;
+    $('time').textContent = fmt(time);
+    $('falls').textContent = falls;
+    $('cp').textContent = cpIndex;
+    $('best').textContent = best !== null ? 'BEST ' + fmt(best) : '';
+    if (inVR) {
+      const g = vrHudCanvas.getContext('2d');
+      g.clearRect(0, 0, 512, 64);
+      g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, 0, 512, 64);
+      g.font = '18px "Press Start 2P", monospace'; g.textBaseline = 'middle';
+      g.fillStyle = '#fff'; g.fillText(fmt(time), 12, 33);
+      g.fillStyle = '#ffd23d'; g.fillText(`CP ${cpIndex}/${checkpoints.length - 1}`, 190, 33);
+      g.fillStyle = '#ff8a8a'; g.fillText(`FALLS ${falls}`, 350, 33);
+      vrHudTex.needsUpdate = true;
+    }
+  }
+  pauseSign.visible = paused && inVR;
+
+  renderer.render(scene, camera);
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

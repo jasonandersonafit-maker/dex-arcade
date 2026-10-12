@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dex Arcade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Monoton&family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  /* Neon arcade at night: one dark look on purpose. */
+  :root { --bg:#07040f; --fg:#f3ecff; --muted:#a99cc8; --pink:#ff3df2; --cyan:#33f0ff; color-scheme: dark; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden;
+               font-family:'Press Start 2P', ui-monospace, monospace; }
+  [hidden] { display:none !important; }
+  canvas { display:block; }
+  #tagline { position:fixed; top:20px; left:0; right:0; margin:0; padding:0 16px; text-align:center; pointer-events:none;
+             font-size:clamp(9px, 1.3vw, 13px); color:var(--cyan); letter-spacing:.25em; text-shadow:0 0 10px #33f0ff99; }
+  #menu { position:fixed; left:0; right:0; bottom:72px; display:flex; flex-wrap:wrap; justify-content:center; gap:10px; padding:0 16px; }
+  .game { font:inherit; font-size:10px; line-height:1.6; color:var(--fg); text-align:left; cursor:pointer;
+          background:rgba(10,6,22,.85); border:2px solid var(--c); border-radius:6px; padding:10px 14px; min-width:160px;
+          box-shadow:0 0 14px color-mix(in srgb, var(--c) 45%, transparent); }
+  .game small { display:block; margin-top:6px; color:var(--muted); font-size:7px; }
+  .game:hover:not(:disabled), .game:focus-visible, .game.hot { background:color-mix(in srgb, var(--c) 22%, #0a0616); outline:none; }
+  .game:disabled { opacity:.45; cursor:default; box-shadow:none; }
+  #walkBtn { font:inherit; font-size:12px; color:#07040f; background:var(--cyan); border:2px solid #000; border-radius:6px; padding:12px 18px; cursor:pointer;
+             box-shadow:0 0 18px #33f0ff99; align-self:stretch; }
+  #walkBtn:hover, #walkBtn:focus-visible { background:#a8f8ff; outline:none; }
+  #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:rgba(255,255,255,.7); pointer-events:none; }
+  #prompt { position:fixed; left:0; right:0; top:58%; text-align:center; font-size:11px; color:var(--cyan); text-shadow:0 0 10px #33f0ff, 2px 2px 0 #000; pointer-events:none; padding:0 16px; }
+  #walkHint { position:fixed; left:0; right:0; bottom:72px; text-align:center; font-size:9px; color:var(--muted); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
+  canvas.walking { cursor:none; }
+  #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .6s; }
+  #fade.on { opacity:1; }
+  @media (max-width: 600px) { #menu { bottom:64px; } .game { min-width:0; flex:1 1 40%; } }
+</style>
+</head>
+<body>
+<p id="tagline">PICK A GAME · CLICK A MACHINE OR PRESS ENTER VR</p>
+<div id="menu"></div>
+<div id="cross" hidden></div>
+<div id="prompt" hidden></div>
+<div id="walkHint" hidden>W A S D: WALK · MOUSE: LOOK · E OR CLICK: PLAY A MACHINE · P / ESC: MENU</div>
+<div id="fade"></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+// ============================================================
+//  YOUR GAMES: add one line here for each new game.
+//  file   = the game's .html file (in the same folder as this one)
+//  screen = what the little cabinet screen shows ('zombies' or 'soon')
+//  Leave out "file" for a machine that isn't ready yet.
+// ============================================================
+const GAMES = [
+  { title: 'ZOMBIE LAIR', file: 'zombie-lair.html', color: '#7dff6b', blurb: 'Blast zombies in a spooky graveyard', screen: 'zombies' },
+  { title: "KING'S CHASE", file: 'kings-chase.html', color: '#ffc830', blurb: 'Outrun the Zombie King', screen: 'chase' },
+  { title: 'SKY PARKOUR', file: 'sky-parkour.html', color: '#33f0ff', blurb: 'Jump across a course in the clouds', screen: 'parkour' },
+  { title: 'HAUNTED MAZE', file: 'haunted-maze.html', color: '#b07dff', blurb: "DO NOT USE. You've been warned...", screen: 'maze', corner: true },
+  { title: 'SANDBOX RANGE', file: 'sandbox-range.html', color: '#ff7a3d', blurb: '9 weapons, blow everything up', screen: 'sandbox' },
+  { title: 'SWORD ARENA', file: 'sword-arena.html', color: '#ff4d6d', blurb: 'Defeat 3 knights to be champion', screen: 'sword' },
+];
+const ARCADE_NAME = 'DEX ARCADE';
+
+// ---------- Basic setup ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x07040f);
+scene.fog = new THREE.Fog(0x07040f, 9, 22);
+
+const rig = new THREE.Group();
+scene.add(rig);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.05, 60);
+camera.position.set(0, 1.6, 2.0);
+rig.add(camera);
+
+scene.add(new THREE.HemisphereLight(0x6a4aff, 0x1a0a2a, 0.7));
+for (const [x, color] of [[-4, 0xff3df2], [4, 0x33f0ff], [0, 0xb07dff]]) {
+  const l = new THREE.PointLight(color, 22, 14);
+  l.position.set(x, 3.8, -3);
+  scene.add(l);
+}
+
+// Helper: draw on a canvas and turn it into a texture
+function canvasTexture(w, h, draw, pixelated = false) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  draw(g, w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  if (pixelated) { tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; }
+  tex.userData = { canvas: c, g };
+  return tex;
+}
+function redraw(tex, draw) {
+  const { canvas, g } = tex.userData;
+  g.setTransform(1, 0, 0, 1, 0, 0);   // undo any shifting from the last drawing
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  draw(g, canvas.width, canvas.height);
+  tex.needsUpdate = true;
+}
+
+// ---------- The room ----------
+// Classic glowing arcade carpet
+const carpet = canvasTexture(512, 512, (g) => {
+  g.fillStyle = '#120a24'; g.fillRect(0, 0, 512, 512);
+  const colors = ['#ff3df2', '#33f0ff', '#ffd23d', '#7d5cff', '#7dff6b'];
+  g.lineWidth = 9; g.lineCap = 'round'; g.lineJoin = 'round';   // thick lines so they don't shimmer at a distance
+  for (let i = 0; i < 34; i++) {
+    g.strokeStyle = g.fillStyle = colors[i % colors.length];
+    const x = 30 + Math.random() * 452, y = 30 + Math.random() * 452, s = 16 + Math.random() * 16;
+    const kind = i % 4;
+    g.beginPath();
+    if (kind === 0) { g.arc(x, y, s * 0.6, 0, Math.PI * 2); g.stroke(); }
+    else if (kind === 1) { g.moveTo(x, y - s); g.lineTo(x + s, y + s); g.lineTo(x - s, y + s); g.closePath(); g.stroke(); }
+    else if (kind === 2) { g.moveTo(x - s, y); for (let k = 0; k < 4; k++) g.lineTo(x - s + (k + 1) * s / 2, y + (k % 2 ? -s / 2 : s / 2)); g.stroke(); }
+    else { g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); }
+  }
+});
+carpet.wrapS = carpet.wrapT = THREE.RepeatWrapping;
+carpet.repeat.set(4, 4);
+carpet.anisotropy = renderer.capabilities.getMaxAnisotropy();   // keeps the pattern crisp at low angles
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(14, 16),
+  new THREE.MeshStandardMaterial({ map: carpet, emissiveMap: carpet, emissive: 0xffffff, emissiveIntensity: 0.25, roughness: 1 }));
+floor.rotation.x = -Math.PI / 2;
+floor.position.set(0, 0.01, -1);   // just above the room's bottom so the two don't flicker against each other
+scene.add(floor);
+
+const room = new THREE.Mesh(new THREE.BoxGeometry(14, 4.6, 16), new THREE.MeshStandardMaterial({ color: 0x150b28, roughness: 1, side: THREE.BackSide }));
+room.position.set(0, 2.3, -1);
+scene.add(room);
+
+// Neon tubes running along the walls
+const tube = (w, h, d, color, x, y, z) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color }));
+  m.position.set(x, y, z);
+  scene.add(m);
+};
+tube(13.8, 0.05, 0.05, 0xff3df2, 0, 4.5, -8.9);
+tube(13.8, 0.05, 0.05, 0x33f0ff, 0, 0.25, -8.9);
+for (const x of [-6.9, 6.9]) {
+  tube(0.05, 0.05, 15.8, 0xff3df2, x, 4.5, -1);
+  tube(0.05, 0.05, 15.8, 0x33f0ff, x, 0.25, -1);
+}
+
+// Big neon sign on the back wall
+let signTex;
+function drawSign(g, w, h) {
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '150px Monoton, "Press Start 2P", sans-serif';
+  for (const [blur, color] of [[60, '#ff3df2'], [24, '#ff3df2'], [0, '#ffe6fd']]) {
+    g.shadowColor = '#ff3df2'; g.shadowBlur = blur; g.fillStyle = color;
+    g.fillText(ARCADE_NAME.replace(/ /g, '   '), w / 2, h / 2 + 10);   // Monoton's spaces are narrow, so widen them
+  }
+}
+signTex = canvasTexture(1400, 300, drawSign);
+const sign = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.5), new THREE.MeshBasicMaterial({ map: signTex, transparent: true, fog: false }));
+sign.position.set(0, 3.7, -8.85);   // high enough to show above the tall cabinets
+scene.add(sign);
+
+// Floating dust in the light
+const dust = (() => {
+  const pts = [];
+  for (let i = 0; i < 250; i++) pts.push(-6 + Math.random() * 12, Math.random() * 4.2, -8 + Math.random() * 10);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  const p = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xd8c8ff, size: 0.025, transparent: true, opacity: 0.6 }));
+  scene.add(p);
+  return p;
+})();
+
+// ---------- Arcade cabinets ----------
+function drawMarquee(game) {
+  return (g, w, h) => {
+    const grd = g.createLinearGradient(0, 0, 0, h);
+    grd.addColorStop(0, '#1a0f30'); grd.addColorStop(1, '#0a0616');
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+    g.strokeStyle = game.color; g.lineWidth = 6; g.strokeRect(4, 4, w - 8, h - 8);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    let size = 34;
+    do { g.font = `${size}px "Press Start 2P", monospace`; size -= 2; } while (g.measureText(game.title).width > w - 40 && size > 10);
+    g.shadowColor = game.color; g.shadowBlur = 16; g.fillStyle = game.color;
+    g.fillText(game.title, w / 2, h / 2 + 2);
+  };
+}
+
+const cabinets = [];
+function makeCabinet(game) {
+  const cab = new THREE.Group();
+  const color = new THREE.Color(game.color);
+  const body = new THREE.MeshStandardMaterial({ color: 0x1b1430, roughness: 0.6 });
+  const side = new THREE.MeshStandardMaterial({ color, roughness: 0.5, emissive: color, emissiveIntensity: 0.25 });
+  const neon = new THREE.MeshBasicMaterial({ color });
+  const add = (geo, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; cab.add(m); return m; };
+
+  add(new THREE.BoxGeometry(0.7, 2.2, 0.7), body, 0, 1.1, 0);                         // main body (tall)
+  for (const sx of [-0.37, 0.37]) {
+    add(new THREE.BoxGeometry(0.04, 2.25, 0.74), side, sx, 1.125, 0);                // coloured side panels
+    add(new THREE.BoxGeometry(0.012, 2.25, 0.012), neon, sx * 1.05, 1.125, 0.37);    // neon edge strip
+  }
+  add(new THREE.BoxGeometry(0.7, 0.95, 0.12), body, 0, 0.47, 0.4);                    // front under the controls
+  add(new THREE.BoxGeometry(0.7, 0.28, 0.25), body, 0, 2.07, 0.24);                   // marquee housing
+  const marqueeTex = canvasTexture(512, 112, drawMarquee(game));
+  const marquee = add(new THREE.PlaneGeometry(0.66, 0.2), new THREE.MeshBasicMaterial({ map: marqueeTex, transparent: true }), 0, 2.07, 0.366);
+  // Tall screen with a moving preview (fills the space between the controls and the marquee)
+  const screenTex = canvasTexture(160, 194, () => {}, true);
+  add(new THREE.BoxGeometry(0.7, 0.86, 0.02), body, 0, 1.5, 0.355);                   // bezel
+  const screen = add(new THREE.PlaneGeometry(0.66, 0.8), new THREE.MeshBasicMaterial({ map: screenTex }), 0, 1.5, 0.367);
+  // Control panel: joystick + buttons
+  add(new THREE.BoxGeometry(0.7, 0.06, 0.32), body, 0, 1.0, 0.5, 0.25);
+  add(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 8), new THREE.MeshStandardMaterial({ color: 0x222222 }), -0.15, 1.07, 0.5);
+  add(new THREE.SphereGeometry(0.032, 12, 8), new THREE.MeshStandardMaterial({ color: 0xff2a3a, roughness: 0.3 }), -0.15, 1.12, 0.5);
+  ['#ff3d3d', '#ffd23d', '#33f0ff'].forEach((c, k) => {
+    add(new THREE.CylinderGeometry(0.026, 0.026, 0.025, 14), new THREE.MeshBasicMaterial({ color: c }), 0.04 + k * 0.09, 1.04, 0.49 - k * 0.0, 0.25);
+  });
+  // Coin door
+  add(new THREE.BoxGeometry(0.2, 0.24, 0.02), new THREE.MeshStandardMaterial({ color: 0x3a3a48, metalness: 0.7, roughness: 0.4 }), 0, 0.45, 0.47);
+  add(new THREE.BoxGeometry(0.02, 0.06, 0.01), new THREE.MeshBasicMaterial({ color: 0xff9a2a }), -0.04, 0.5, 0.482);
+  add(new THREE.BoxGeometry(0.02, 0.06, 0.01), new THREE.MeshBasicMaterial({ color: 0xff9a2a }), 0.04, 0.5, 0.482);
+
+  cab.userData = { game, side, screen, screenTex, marqueeTex, marquee, hot: 0 };
+  if (game.corner) makeItCreepy(cab, add);
+  return cab;
+}
+
+// ---------- The haunted machine in the corner ----------
+function makeItCreepy(cab, add) {
+  // "DO NOT USE" paper sign taped crooked over the screen
+  const signTex = canvasTexture(256, 160, (g) => {
+    g.fillStyle = '#efe8d4'; g.fillRect(8, 8, 240, 144);
+    g.fillStyle = 'rgba(120,90,40,0.25)'; for (let i = 0; i < 40; i++) g.fillRect(8 + Math.random() * 240, 8 + Math.random() * 144, 3, 3);   // dirty paper
+    g.fillStyle = 'rgba(230,220,170,0.85)'; g.fillRect(0, 0, 44, 18); g.fillRect(212, 0, 44, 18);   // tape
+    g.fillStyle = '#b00010'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = 'bold 44px Impact, "Arial Black", sans-serif'; g.fillText('DO NOT', 128, 58);
+    g.fillText('USE', 128, 104);
+    g.font = '16px "Press Start 2P", monospace'; g.fillText('!!!', 128, 138);
+  });
+  const sign = add(new THREE.PlaneGeometry(0.44, 0.28), new THREE.MeshBasicMaterial({ map: signTex, transparent: true }), 0.03, 1.62, 0.378);
+  sign.rotation.z = 0.14;
+  // Caution tape crossing the front in a big X
+  const tapeTex = canvasTexture(512, 32, (g) => {
+    g.fillStyle = '#ffd200'; g.fillRect(0, 0, 512, 32);
+    g.fillStyle = '#111'; g.font = 'bold 20px Impact, "Arial Black", sans-serif'; g.textBaseline = 'middle';
+    for (let x = 6; x < 512; x += 170) g.fillText('DO NOT USE', x, 17);
+  });
+  for (const r of [0.85, -0.85]) {
+    const tape = add(new THREE.PlaneGeometry(1.5, 0.07), new THREE.MeshBasicMaterial({ map: tapeTex, side: THREE.DoubleSide }), 0, 1.25, 0.39 + (r > 0 ? 0.004 : 0.008));
+    tape.rotation.z = r;
+  }
+  // Cracks across the screen
+  const crackTex = canvasTexture(256, 320, (g) => {
+    g.strokeStyle = 'rgba(255,255,255,0.75)'; g.lineWidth = 2;
+    const crack = (x, y, n) => { g.beginPath(); g.moveTo(x, y); for (let i = 0; i < n; i++) { x += (Math.random() - 0.5) * 60; y += Math.random() * 50; g.lineTo(x, y); } g.stroke(); };
+    for (let i = 0; i < 6; i++) crack(160 + (Math.random() - 0.5) * 30, 80 + (Math.random() - 0.5) * 30, 5);
+    for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(160, 80); g.lineTo(160 + (Math.random() - 0.5) * 220, 80 + (Math.random() - 0.5) * 160); g.stroke(); }
+  });
+  add(new THREE.PlaneGeometry(0.66, 0.8), new THREE.MeshBasicMaterial({ map: crackTex, transparent: true }), 0, 1.5, 0.371);
+  // Cobwebs in the top corners
+  const webTex = canvasTexture(128, 128, (g) => {
+    g.strokeStyle = 'rgba(230,230,240,0.7)'; g.lineWidth = 1.2;
+    for (let a = 0; a <= 6; a++) { const ang = (a / 6) * Math.PI / 2; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(ang) * 128, Math.sin(ang) * 128); g.stroke(); }
+    for (let r = 16; r < 128; r += 16) { g.beginPath(); for (let a = 0; a <= 6; a++) { const ang = (a / 6) * Math.PI / 2, rr = r + Math.sin(a * 3) * 3; a ? g.lineTo(Math.cos(ang) * rr, Math.sin(ang) * rr) : g.moveTo(Math.cos(ang) * rr, Math.sin(ang) * rr); } g.stroke(); }
+  });
+  const webMat = new THREE.MeshBasicMaterial({ map: webTex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+  const webL = add(new THREE.PlaneGeometry(0.42, 0.42), webMat, -0.18, 2.0, 0.4);
+  const webR = add(new THREE.PlaneGeometry(0.42, 0.42), webMat, 0.18, 2.0, 0.4);
+  webL.scale.y = -1; webR.scale.set(-1, -1, 1);
+  // Its own dim, flickering red light
+  const light = new THREE.PointLight(0xff2020, 3, 4);
+  light.position.set(0, 2.4, 0.9);
+  cab.add(light);
+  cab.userData.creepy = { light, whisperT: 0 };
+  // Darker, grimier body
+  cab.userData.side.color.set(0x3a2a4a);
+  cab.userData.side.emissive.set(0x2a0a2a);
+}
+
+// Lay the cabinets out in a gentle curve facing you (the haunted one goes in the corner)
+const spacing = 1.2;   // distance between machines (bigger = farther apart)
+const inArc = GAMES.filter(g => !g.corner).length;
+let arcIndex = 0;
+GAMES.forEach((game) => {
+  const cab = makeCabinet(game);
+  if (game.corner) {
+    cab.position.set(-5.9, 0, -7.7);                       // back-left corner of the room
+    cab.rotation.y = Math.atan2(5.9, 7.7) - 0.2;           // turned a little crooked toward the room
+  } else {
+    const offset = (arcIndex++ - (inArc - 1) / 2) * spacing;
+    const angle = offset / 3.6;
+    cab.position.set(Math.sin(angle) * 3.6, 0, -Math.cos(angle) * 3.6 + 0.4);
+    cab.rotation.y = -angle;
+  }
+  cab.userData.baseX = cab.position.x;
+  scene.add(cab);
+  cabinets.push(cab);
+});
+
+// ---------- Little screen previews ----------
+const pixelZombie = (g, x, y, s, t) => {
+  g.fillStyle = '#7fa860'; g.fillRect(x, y, 4 * s, 4 * s);               // head
+  g.fillStyle = '#ff2020'; g.fillRect(x + s, y + s, s, s * 0.6); g.fillRect(x + 2.4 * s, y + s, s, s * 0.6);
+  g.fillStyle = '#5a6b3a'; g.fillRect(x, y + 4 * s, 4 * s, 4 * s);       // body
+  g.fillRect(x + 4 * s, y + 4.5 * s, 3 * s, s);                          // arm out front
+  g.fillStyle = '#2b3448';
+  const step = Math.sin(t * 8) > 0 ? s : 0;
+  g.fillRect(x, y + 8 * s, 1.6 * s, 3 * s - step); g.fillRect(x + 2.4 * s, y + 8 * s, 1.6 * s, 3 * s - (s - step));
+};
+function drawScreen(cab, t) {
+  const game = cab.userData.game;
+  redraw(cab.userData.screenTex, (g, w, fullH) => {
+    g.imageSmoothingEnabled = false;
+    // The game scenes are drawn 120 pixels tall; on the tall screen we add extra sky above them
+    let h = fullH;
+    if (game.screen === 'zombies' || game.screen === 'chase' || game.screen === 'parkour' || game.screen === 'maze' || game.screen === 'sandbox' || game.screen === 'sword') {
+      h = 120;
+      const extra = fullH - h;
+      g.fillStyle = { zombies: '#1a0840', chase: '#3a3aa0', parkour: '#3a7ae0', maze: '#000000', sandbox: '#3a8ae8', sword: '#3a2a6a' }[game.screen];
+      g.fillRect(0, 0, w, extra + 1);
+      g.fillStyle = '#fff6d0';
+      for (let s = 0; s < 14; s++) g.fillRect((s * 37) % w, (s * 23) % extra, 1, 1);   // stars
+      if (game.screen === 'zombies' && Math.sin(t * 3) > 0) { g.fillStyle = '#9dff7a'; g.fillRect(20 + (t * 10) % 120, 30, 2, 2); }   // ghost wisp
+      // Title at the top of the screen
+      g.fillStyle = game.color; g.font = '9px "Press Start 2P", monospace'; g.textAlign = 'center';
+      g.fillText(game.title, w / 2, 22);
+      g.translate(0, extra);
+    }
+    if (game.screen === 'zombies') {
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, '#1a0840'); grd.addColorStop(0.7, '#5a2a7a'); grd.addColorStop(0.72, '#2f4a3a'); grd.addColorStop(1, '#1f3020');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#eaffb8'; g.beginPath(); g.arc(30, 26, 12, 0, Math.PI * 2); g.fill();
+      g.fillStyle = '#6f6890';
+      for (const x of [14, 60, 104, 140]) { g.fillRect(x, 78, 10, 12); g.fillRect(x + 1, 75, 8, 4); }
+      for (let k = 0; k < 3; k++) {
+        const x = ((t * 18 + k * 55) % (w + 30)) - 30;
+        pixelZombie(g, x, 66 - k * 2, 2, t + k);
+      }
+      if (Math.sin(t * 5) > 0.6) {   // gun tracer
+        g.strokeStyle = '#ffe28a'; g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(w / 2, h); g.lineTo(((t * 18 + 55) % (w + 30)) - 24, 74); g.stroke();
+      }
+      g.fillStyle = '#7dff6b'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('PRESS START', w / 2, 110);
+    } else if (game.screen === 'sword') {
+      // Two knights clashing swords in the colosseum
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, '#3a2a6a'); grd.addColorStop(0.5, '#ffb070'); grd.addColorStop(0.62, '#c4a080'); grd.addColorStop(1, '#d6b482');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#8a7a64'; g.fillRect(0, 58, w, 18);                                       // arena wall
+      for (let x = 4; x < w; x += 12) { g.fillStyle = ['#c84a3a', '#3a6ac8', '#e8c040', '#4aa04a'][(x / 12 | 0) % 4]; g.fillRect(x, 50 + (Math.sin(t * 6 + x) > 0.6 ? -2 : 0), 6, 7); }   // crowd
+      const clash = Math.sin(t * 3) > 0;
+      const knight = (x, armor, facing) => {
+        g.fillStyle = armor; g.fillRect(x, 74, 12, 16); g.fillRect(x + 1, 66, 10, 9);       // body + helmet
+        g.fillStyle = '#000'; g.fillRect(x + (facing > 0 ? 6 : 1), 69, 5, 2);                // visor
+        g.fillStyle = '#2b3448'; g.fillRect(x + 1, 90, 4, 10); g.fillRect(x + 7, 90, 4, 10);
+      };
+      knight(52, '#c8d0dc', 1);
+      knight(96, '#1a1a22', -1);
+      g.strokeStyle = '#e8ecf4'; g.lineWidth = 2;
+      g.beginPath(); g.moveTo(64, 78); g.lineTo(clash ? 84 : 76, clash ? 64 : 58); g.stroke();   // swords
+      g.strokeStyle = '#ff5050';
+      g.beginPath(); g.moveTo(96, 78); g.lineTo(clash ? 80 : 88, clash ? 64 : 58); g.stroke();
+      if (clash && Math.sin(t * 3) > 0.85) { g.fillStyle = '#ffe060'; for (let i = 0; i < 6; i++) g.fillRect(80 + Math.cos(i) * 6, 62 + Math.sin(i * 2) * 5, 2, 2); }   // sparks
+      g.fillStyle = '#ff4d6d'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('EN GARDE!', w / 2, 116);
+    } else if (game.screen === 'sandbox') {
+      // Desert range: targets, a barrel blowing up, and a gun firing
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, '#3a8ae8'); grd.addColorStop(0.55, '#9ad0ff'); grd.addColorStop(0.56, '#e0c890'); grd.addColorStop(1, '#c8a870');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#c87a4a'; g.fillRect(10, 50, 40, 16); g.fillRect(110, 46, 36, 20);          // mesas
+      for (const [x, y, r] of [[40, 70, 9], [80, 64, 7], [120, 72, 10]]) {                        // bullseyes
+        g.fillStyle = '#6a4020'; g.fillRect(x - 1, y, 2, 14);
+        ['#fff', '#222', '#3a7aff', '#ff3d3d', '#ffd23d'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(x, y, r - i * r / 5, 0, Math.PI * 2); g.fill(); });
+      }
+      const cycle = t % 3;                                                                          // barrel explodes every 3 seconds
+      if (cycle < 2) { g.fillStyle = '#d02a1a'; g.fillRect(96, 78, 10, 14); }
+      else { const s = 6 + (cycle - 2) * 30; g.fillStyle = `rgba(255,${150 - (cycle - 2) * 100 | 0},40,${1 - (cycle - 2)})`; g.beginPath(); g.arc(101, 84, s, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = '#222'; g.fillRect(70, 96, 50, 10); g.fillRect(64, 99, 10, 6); g.fillRect(100, 104, 8, 10);   // gun
+      if (Math.sin(t * 14) > 0.3) { g.fillStyle = '#ffd060'; g.beginPath(); g.arc(122, 99, 5, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = '#ff7a3d'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('FIRE!', w / 2, 118);
+    } else if (game.screen === 'maze') {
+      // A dark hallway in a flashlight beam... and sometimes a ghost at the end
+      g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+      const cx = w / 2 + Math.sin(t * 0.9) * 10, cy = 62;
+      g.save();
+      g.beginPath(); g.arc(cx, cy, 52, 0, Math.PI * 2); g.clip();
+      g.fillStyle = '#4a4640'; g.fillRect(0, 0, w, h);                                   // walls
+      g.fillStyle = '#2a2622';
+      g.beginPath(); g.moveTo(0, 0); g.lineTo(w, 0); g.lineTo(w / 2 + 14, cy - 12); g.lineTo(w / 2 - 14, cy - 12); g.fill();   // ceiling
+      g.fillStyle = '#3a2a1c';
+      g.beginPath(); g.moveTo(0, h); g.lineTo(w, h); g.lineTo(w / 2 + 14, cy + 12); g.lineTo(w / 2 - 14, cy + 12); g.fill();   // floor
+      g.fillStyle = '#000'; g.fillRect(w / 2 - 14, cy - 12, 28, 24);                       // darkness ahead
+      g.strokeStyle = '#2a2826'; g.lineWidth = 1;
+      for (let y = 10; y < 110; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(w / 2 - 14, cy - 12 + (y / 120) * 24); g.stroke(); g.beginPath(); g.moveTo(w, y); g.lineTo(w / 2 + 14, cy - 12 + (y / 120) * 24); g.stroke(); }
+      if (Math.sin(t * 0.7) > 0.6) {                                                        // the ghost appears!
+        g.fillStyle = '#e8eef8'; g.beginPath(); g.arc(w / 2, cy - 4, 5, 0, Math.PI * 2); g.fill(); g.fillRect(w / 2 - 5, cy - 4, 10, 12);
+        g.fillStyle = '#000'; g.fillRect(w / 2 - 3, cy - 6, 2, 3); g.fillRect(w / 2 + 1, cy - 6, 2, 3);
+      }
+      g.restore();
+      const grd = g.createRadialGradient(cx, cy, 20, cx, cy, 54);
+      grd.addColorStop(0, 'rgba(0,0,0,0)'); grd.addColorStop(1, 'rgba(0,0,0,0.9)');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#c01020'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 1.5) % 2 === 0) g.fillText('DO NOT ENTER', w / 2, 116);
+      // Glitches: static bursts, and now and then a ghost face fills the screen
+      const r = Math.random();
+      if (r < 0.06) {
+        for (let y = -80; y < h; y += 3) { g.fillStyle = `rgba(${Math.random() * 200 | 0},${Math.random() * 200 | 0},${Math.random() * 220 | 0},0.6)`; g.fillRect(0, y, w, 2); }
+      } else if (r < 0.085) {
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        g.fillStyle = '#000'; g.fillRect(0, 0, w, fullH);
+        g.fillStyle = '#e8eef8'; g.beginPath(); g.ellipse(w / 2, fullH / 2, 44, 62, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = '#000';
+        g.beginPath(); g.ellipse(w / 2 - 17, fullH / 2 - 14, 11, 16, 0.2, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.ellipse(w / 2 + 17, fullH / 2 - 14, 11, 16, -0.2, 0, Math.PI * 2); g.fill();
+        g.beginPath(); g.ellipse(w / 2, fullH / 2 + 28, 12, 20, 0, 0, Math.PI * 2); g.fill();
+      }
+    } else if (game.screen === 'parkour') {
+      // Floating blocks drifting by over clouds, and a little player hopping between them
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, '#3a7ae0'); grd.addColorStop(1, '#bfe0ff');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#ffffff';
+      for (let c = 0; c < 4; c++) g.fillRect(((c * 50 + t * 6) % (w + 40)) - 40, 98 + (c % 2) * 8, 34, 6);   // clouds below
+      const scroll = (t * 24) % 32;
+      const colors = ['#8a8a8a', '#b8884e', '#f0ece4', '#7ad04a', '#ffd23d'];
+      for (let i = -1; i < 7; i++) {
+        const n = i + Math.floor(t * 24 / 32);
+        const bx = i * 32 - scroll, by = 70 - (n % 3) * 10;
+        g.fillStyle = colors[((n % colors.length) + colors.length) % colors.length]; g.fillRect(bx, by, 14, 14);
+        g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(bx, by + 10, 14, 4);
+      }
+      const phase = (t * 24 % 32) / 32;                      // hop arc between blocks
+      const py = 56 - Math.sin(phase * Math.PI) * 18;
+      g.fillStyle = '#33a0ff'; g.fillRect(60, py, 8, 9);
+      g.fillStyle = '#e0a878'; g.fillRect(60, py - 7, 8, 7);
+      g.fillStyle = '#2b3448'; g.fillRect(60, py + 9, 3, 5); g.fillRect(65, py + 9, 3, 5);
+      g.fillStyle = '#33f0ff'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('JUMP!', w / 2, 116);
+    } else if (game.screen === 'chase') {
+      // Blocky sunset world scrolling by, a runner, and the King chasing
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, '#3a3aa0'); grd.addColorStop(0.5, '#ffb070'); grd.addColorStop(1, '#e89a80');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#fff0a0'; g.fillRect(118, 30, 22, 22);                               // square sun
+      const scroll = (t * 40) % 16;
+      for (let x = -16; x < w + 16; x += 16) {                                              // grass blocks
+        const bx = x - scroll, col = Math.floor((x + Math.floor(t * 40 / 16) * 16) / 16);
+        const top = 84 - (Math.sin(col * 0.9) > 0.3 ? 8 : 0);
+        g.fillStyle = '#7a5434'; g.fillRect(bx, top, 16, h - top);
+        g.fillStyle = '#5fae3c'; g.fillRect(bx, top, 16, 4);
+      }
+      const hop = Math.abs(Math.sin(t * 6)) * 6;
+      g.fillStyle = '#33a0ff'; g.fillRect(104, 60 - hop, 8, 10);                          // runner
+      g.fillStyle = '#e0a878'; g.fillRect(104, 52 - hop, 8, 8);
+      g.fillStyle = '#2b3448'; g.fillRect(104, 70 - hop, 3, 8); g.fillRect(109, 70 - hop, 3, 8);
+      const kx = 30 + Math.sin(t * 0.8) * 12;                                              // the King
+      g.fillStyle = '#4f7a3a'; g.fillRect(kx, 34, 16, 16);
+      g.fillStyle = '#ff2020'; g.fillRect(kx + 9, 39, 3, 2); g.fillRect(kx + 13, 39, 3, 2);
+      g.fillStyle = '#ffc830'; g.fillRect(kx - 1, 28, 18, 5); g.fillRect(kx, 25, 3, 3); g.fillRect(kx + 7, 25, 3, 3); g.fillRect(kx + 14, 25, 3, 3);
+      g.fillStyle = '#3a1050'; g.fillRect(kx, 50, 16, 20);
+      g.fillStyle = '#4f7a3a'; g.fillRect(kx + 16, 54, 12, 5);
+      g.fillStyle = '#2b3448'; g.fillRect(kx + 1, 70, 6, 12); g.fillRect(kx + 9, 70, 6, 12);
+      g.fillStyle = '#ffc830'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('RUN!', w / 2, 110);
+    } else {
+      // TV static with a blinking "COMING SOON"
+      for (let y = 0; y < h; y += 4) for (let x = 0; x < w; x += 4) {
+        const v = Math.random() * 70 | 0;
+        g.fillStyle = `rgb(${v},${v},${v + 15})`;
+        g.fillRect(x, y, 4, 4);
+      }
+      g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, h / 2 - 20, w, 40);
+      g.fillStyle = game.color; g.font = '10px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 1.5) % 2 === 0) g.fillText('COMING SOON', w / 2, h / 2 + 4);
+    }
+  });
+}
+
+// ---------- On-screen menu (PC) ----------
+const menu = document.getElementById('menu');
+// A button for each playable game, plus one note for the machines still to come
+const buttons = GAMES.map((game, i) => {
+  if (!game.file) return null;
+  const b = document.createElement('button');
+  b.className = 'game';
+  b.type = 'button';
+  b.style.setProperty('--c', game.color);
+  b.innerHTML = `▶ ${game.title}<small>${game.blurb}</small>`;
+  b.addEventListener('click', () => launch(cabinets[i]));
+  b.addEventListener('mouseenter', () => { menuHover = cabinets[i]; hoverSound(cabinets[i]); });
+  b.addEventListener('mouseleave', () => { menuHover = null; });
+  b.addEventListener('focus', () => { menuHover = cabinets[i]; });
+  b.addEventListener('blur', () => { menuHover = null; });
+  menu.appendChild(b);
+  return b;
+});
+// "Walk around" button: explore the arcade on foot
+const walkBtn = document.createElement('button');
+walkBtn.id = 'walkBtn';
+walkBtn.type = 'button';
+walkBtn.textContent = '🚶 WALK AROUND';
+walkBtn.addEventListener('click', () => enterWalk());
+menu.prepend(walkBtn);
+const soonCount = GAMES.filter(g => !g.file).length;
+if (soonCount) {
+  const note = document.createElement('button');
+  note.className = 'game';
+  note.type = 'button';
+  note.disabled = true;
+  note.style.setProperty('--c', '#a99cc8');
+  note.innerHTML = `${soonCount} MORE<small>coming soon</small>`;
+  menu.appendChild(note);
+}
+
+// ---------- Sound ----------
+let audio;
+function beep(freq, dur, type = 'square', vol = 0.08) {
+  try {
+    audio ??= new AudioContext();
+    const o = audio.createOscillator(), gn = audio.createGain();
+    o.type = type; o.frequency.value = freq;
+    gn.gain.setValueAtTime(vol, audio.currentTime);
+    gn.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
+    o.connect(gn).connect(audio.destination);
+    o.start(); o.stop(audio.currentTime + dur);
+  } catch (e) { /* sound is optional */ }
+}
+
+// Creepy whisper (filtered noise) for the haunted machine
+function whisper() {
+  try {
+    audio ??= new AudioContext();
+    for (let i = 0; i < 4; i++) {
+      const len = Math.floor(audio.sampleRate * 0.3), buf = audio.createBuffer(1, len, audio.sampleRate), d = buf.getChannelData(0);
+      for (let j = 0; j < len; j++) d[j] = (Math.random() * 2 - 1) * Math.sin(Math.PI * j / len);
+      const src = audio.createBufferSource(), f = audio.createBiquadFilter(), g = audio.createGain();
+      src.buffer = buf; f.type = 'bandpass'; f.frequency.value = 2500 + Math.random() * 2000; f.Q.value = 6; g.gain.value = 0.05;
+      src.connect(f).connect(g).connect(audio.destination);
+      src.start(audio.currentTime + i * 0.22);
+    }
+  } catch (e) { /* sound is optional */ }
+}
+
+// ---------- Picking a machine ----------
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2(9, 9);   // off-screen until the mouse moves
+let mouseHover = null, menuHover = null, launching = false;
+const tmpPos = new THREE.Vector3(), tmpQuat = new THREE.Quaternion();
+
+function cabinetFromRay() {
+  const hit = raycaster.intersectObjects(cabinets, true)[0];
+  if (!hit) return null;
+  let o = hit.object;
+  while (o && !cabinets.includes(o)) o = o.parent;
+  return o;
+}
+
+function launch(cab) {
+  if (!cab || launching) return;
+  const game = cab.userData.game;
+  if (!game.file) {
+    beep(140, 0.25, 'sawtooth', 0.1);   // not ready yet: sad buzz and a little shake
+    cab.userData.shake = 0.4;
+    return;
+  }
+  launching = true;
+  [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.15), i * 90));
+  document.getElementById('fade').classList.add('on');
+  const go = () => {
+    location.href = game.file;
+    // The app's file viewer can't switch pages: undo the fade and explain where to play instead
+    setTimeout(() => {
+      if (location.protocol !== 'file:') return;
+      launching = false;
+      document.getElementById('fade').classList.remove('on');
+      const n = document.createElement('div');
+      n.textContent = "This viewer can't switch pages. Open the arcade at http://localhost:8124 (or your GitHub link) to play.";
+      n.style.cssText = 'position:fixed;left:50%;top:50px;transform:translateX(-50%);max-width:90vw;background:rgba(0,0,0,.85);color:#fff;padding:12px 16px;font:13px system-ui,sans-serif;z-index:99;border:2px solid #ff3df2;border-radius:8px;text-align:center';
+      document.body.appendChild(n);
+      setTimeout(() => n.remove(), 7000);
+    }, 800);
+  };
+  if (renderer.xr.isPresenting) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  else setTimeout(go, 650);
+}
+
+// Machines only beep when YOU move the mouse onto one (not when the camera drifts)
+let lastSoundCab = null;
+function hoverSound(cab) { beep(cab.userData.game.file ? 880 : 330, 0.05, 'square', 0.04); }
+renderer.domElement.addEventListener('mousemove', e => {
+  if (walking) return;   // walking mode handles the mouse itself
+  mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(mouse, camera);
+  const cab = cabinetFromRay();
+  if (cab && cab !== lastSoundCab) hoverSound(cab);
+  lastSoundCab = cab;
+});
+renderer.domElement.addEventListener('mouseleave', () => { mouse.set(9, 9); lastSoundCab = null; });
+// Work out which machine is under the cursor right at the moment of the click
+renderer.domElement.addEventListener('click', e => {
+  if (walking) {
+    if (!locked && !freeLook) { lockMouse(); return; }
+    launch(walkHot);   // play the machine you're looking at
+    return;
+  }
+  mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(mouse, camera);
+  launch(cabinetFromRay());
+});
+
+// ---------- Walking around the arcade ----------
+let walking = false, walkHot = null, locked = false, freeLook = false, mouseX = null;
+const walker = { pos: new THREE.Vector3(0, 0, 3), vel: new THREE.Vector3(), yaw: 0, pitch: -0.05, onGround: true, phase: 0 };
+const walkKeys = {};
+let mcSensitivity = 0.5;   // same Minecraft-style mouse turning as the games
+try { const s = parseFloat(localStorage.getItem('mcSensitivity')); if (s >= 0 && s <= 1) mcSensitivity = s; } catch (e) {}
+const radiansPerPixel = () => { const f = mcSensitivity * 0.6 + 0.2; return f * f * f * 8 * 0.15 * Math.PI / 180; };
+function lockMouse() {
+  const el = renderer.domElement;
+  const plain = () => { try { const p = el.requestPointerLock(); if (p && p.catch) p.catch(() => { freeLook = true; }); } catch (e) { freeLook = true; } };
+  try {
+    const p = el.requestPointerLock({ unadjustedMovement: true });
+    if (p && p.catch) p.catch(err => (err && err.name === 'NotSupportedError') ? plain() : (freeLook = true));
+  } catch (e) { plain(); }
+}
+function enterWalk() {
+  walking = true;
+  walker.pos.set(0, 0, 3); walker.vel.set(0, 0, 0); walker.yaw = 0; walker.pitch = -0.05;
+  camera.rotation.order = 'YXZ';
+  menu.hidden = true; document.getElementById('tagline').hidden = true;
+  document.getElementById('cross').hidden = false; document.getElementById('walkHint').hidden = false;
+  renderer.domElement.classList.add('walking');
+  document.activeElement?.blur();
+  beep(660, 0.08); beep(990, 0.1);
+  lockMouse();
+}
+function exitWalk() {
+  walking = false; walkHot = null;
+  for (const k in walkKeys) walkKeys[k] = false;
+  camera.rotation.set(0, 0, 0); camera.position.set(0, 1.6, 2.0);
+  rig.position.set(0, 0, 0);
+  menu.hidden = false; document.getElementById('tagline').hidden = false;
+  document.getElementById('cross').hidden = true; document.getElementById('walkHint').hidden = true; document.getElementById('prompt').hidden = true;
+  renderer.domElement.classList.remove('walking');
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+document.addEventListener('pointerlockchange', () => {
+  const was = locked;
+  locked = document.pointerLockElement === renderer.domElement;
+  if (was && !locked && walking) exitWalk();   // Esc lets go of the mouse: back to the menu
+});
+addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  if (!walking || (!locked && !freeLook)) return;
+  const k = radiansPerPixel();
+  walker.yaw -= e.movementX * k;
+  walker.pitch = THREE.MathUtils.clamp(walker.pitch - e.movementY * k, -Math.PI / 2, Math.PI / 2);
+});
+document.documentElement.addEventListener('mouseleave', e => {
+  const x = e.clientX ?? mouseX ?? innerWidth / 2;
+  mouseX = x <= innerWidth * 0.15 ? 0 : x >= innerWidth * 0.85 ? innerWidth : null;
+});
+addEventListener('keydown', e => {
+  walkKeys[e.code] = true;
+  if (!walking) return;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if ((e.code === 'KeyP' || e.code === 'Escape') && !e.repeat) exitWalk();
+  if (e.code === 'KeyE' && !e.repeat) launch(walkHot);
+});
+addEventListener('keyup', e => { walkKeys[e.code] = false; });
+addEventListener('blur', () => { for (const k in walkKeys) walkKeys[k] = false; });
+
+// You bump into machines and walls
+const WALK_R = 0.3;
+function blockWalker(p) {
+  p.x = THREE.MathUtils.clamp(p.x, -6.6, 6.6);
+  p.z = THREE.MathUtils.clamp(p.z, -8.6, 6.6);
+  for (const cab of cabinets) {
+    const dx = p.x - cab.position.x, dz = p.z - cab.position.z, d = Math.hypot(dx, dz), min = 0.55 + WALK_R;
+    if (d < min && d > 1e-4) { p.x = cab.position.x + dx / d * min; p.z = cab.position.z + dz / d * min; }
+  }
+}
+function updateWalk(dt, inVR) {
+  let fx = 0, sx = 0, jump = false;
+  if (inVR) {
+    for (const c of controllers) {
+      const src = c.userData.input, ax = src?.gamepad?.axes;
+      if (!ax || ax.length < 4) continue;
+      if (src.handedness === 'left') { sx = ax[2]; fx = -ax[3]; }
+      if (src.handedness === 'right') {
+        if (Math.abs(ax[2]) > 0.7 && c.userData.snapReady !== false) { rig.rotation.y -= Math.sign(ax[2]) * Math.PI / 6; c.userData.snapReady = false; }
+        if (Math.abs(ax[2]) < 0.3) c.userData.snapReady = true;
+      }
+    }
+    if (Math.abs(fx) < 0.15) fx = 0; if (Math.abs(sx) < 0.15) sx = 0;
+  } else {
+    if (walkKeys.KeyW) fx += 1; if (walkKeys.KeyS) fx -= 1;
+    if (walkKeys.KeyD) sx += 1; if (walkKeys.KeyA) sx -= 1;
+    jump = !!walkKeys.Space;
+    if (walkKeys.ArrowLeft) walker.yaw += 2.2 * dt;
+    if (walkKeys.ArrowRight) walker.yaw -= 2.2 * dt;
+    if (walkKeys.ArrowUp) walker.pitch = Math.min(1.5, walker.pitch + 1.6 * dt);
+    if (walkKeys.ArrowDown) walker.pitch = Math.max(-1.5, walker.pitch - 1.6 * dt);
+    if (freeLook && mouseX !== null) {   // window won't capture the mouse: push to the edge to keep turning
+      const edge = innerWidth * 0.08;
+      if (mouseX < edge) walker.yaw += 2.4 * dt * (1 - mouseX / edge);
+      else if (mouseX > innerWidth - edge) walker.yaw -= 2.4 * dt * (1 - (innerWidth - mouseX) / edge);
+    }
+  }
+  let yaw = walker.yaw;
+  if (inVR) { camera.getWorldDirection(tmpPos); yaw = Math.atan2(-tmpPos.x, -tmpPos.z); }
+  const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  const wish = fwd.multiplyScalar(fx).add(right.multiplyScalar(sx));
+  if (wish.lengthSq() > 1) wish.normalize();
+  const k = Math.min(1, (walker.onGround ? 14 : 4) * dt);
+  walker.vel.x += (wish.x * 4.3 - walker.vel.x) * k;
+  walker.vel.z += (wish.z * 4.3 - walker.vel.z) * k;
+  if (jump && walker.onGround) { walker.vel.y = 8.4; walker.onGround = false; }
+  walker.vel.y -= 28 * dt;
+  walker.pos.addScaledVector(walker.vel, dt);
+  if (walker.pos.y <= 0) { walker.pos.y = 0; walker.vel.y = 0; walker.onGround = true; }
+  blockWalker(walker.pos);
+  const hs = Math.hypot(walker.vel.x, walker.vel.z);
+  if (walker.onGround && hs > 0.5) {
+    const before = Math.sin(walker.phase);
+    walker.phase += dt * hs * 2.2;
+    if (before < 0 && Math.sin(walker.phase) >= 0) beep(90 + Math.random() * 20, 0.04, 'sine', 0.05);   // soft carpet steps
+  }
+  rig.position.set(walker.pos.x, 0, walker.pos.z);
+  if (!inVR) {
+    const bob = walker.onGround ? Math.sin(walker.phase * 2) * 0.03 * Math.min(1, hs / 4) : 0;
+    camera.position.set(0, 1.6 + walker.pos.y + bob, 0);
+    camera.rotation.set(walker.pitch, walker.yaw, 0);
+    // The machine in the middle of your view (if you're close enough)
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    raycaster.far = 2.6;
+    walkHot = cabinetFromRay();
+    raycaster.far = Infinity;
+    const prompt = document.getElementById('prompt');
+    prompt.hidden = !walkHot;
+    if (walkHot) prompt.textContent = `PRESS E OR CLICK TO PLAY ${walkHot.userData.game.title}`;
+    if (walkHot && walkHot !== lastWalkHot) hoverSound(walkHot);   // beep when you look at a new machine
+    lastWalkHot = walkHot;
+  }
+}
+let lastWalkHot = null;
+
+// VR: point a controller at a machine and pull the trigger
+const controllers = [];
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.addEventListener('connected', e => { c.userData.input = e.data; });
+  c.addEventListener('selectstart', () => launch(c.userData.hover));
+  const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]),
+    new THREE.LineBasicMaterial({ color: 0xff3df2 }));
+  laser.scale.z = 6;
+  c.add(laser);
+  c.userData.laser = laser;
+  rig.add(c);
+  controllers.push(c);
+}
+
+// ---------- Main loop ----------
+const clock = new THREE.Clock();
+const lookTarget = new THREE.Vector3(0, 1.45, -3);
+const wantLook = new THREE.Vector3();
+let lastHot = null, screenTimer = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  const inVR = renderer.xr.isPresenting;
+
+  // Which machine is being pointed at?
+  let hot = null;
+  if (inVR) {
+    updateWalk(dt, true);   // walk around with the left stick, snap-turn with the right
+    for (const c of controllers) {
+      c.getWorldPosition(tmpPos); c.getWorldQuaternion(tmpQuat);
+      raycaster.set(tmpPos, new THREE.Vector3(0, 0, -1).applyQuaternion(tmpQuat));
+      c.userData.hover = cabinetFromRay();
+      if (c.userData.hover) hot = c.userData.hover;
+    }
+  } else if (walking) {
+    updateWalk(dt, false);
+    hot = walkHot;
+  } else {
+    raycaster.setFromCamera(mouse, camera);
+    mouseHover = cabinetFromRay();
+    hot = menuHover || mouseHover;
+    renderer.domElement.style.cursor = mouseHover ? (mouseHover.userData.game.file ? 'pointer' : 'not-allowed') : 'default';
+    // Camera drifts gently, leans a little with the mouse, and turns toward a game picked in the menu
+    camera.position.x = Math.sin(t * 0.25) * 0.15;
+    const mx = Math.abs(mouse.x) <= 1 ? mouse.x : 0, my = Math.abs(mouse.y) <= 1 ? mouse.y : 0;
+    wantLook.set(mx * 0.6, 1.45 + my * 0.25, -3);
+    if (menuHover) menuHover.getWorldPosition(wantLook).setY(1.35);
+    lookTarget.lerp(wantLook, 1 - Math.exp(-dt * 3));
+    camera.lookAt(lookTarget);
+  }
+  if (hot !== lastHot) {
+    if (hot && inVR) hoverSound(hot);   // in VR, beep when your pointer moves onto a machine
+    buttons.forEach((b, i) => b?.classList.toggle('hot', cabinets[i] === hot));
+    lastHot = hot;
+  }
+
+  // Glow the highlighted machine, shake ones that aren't ready
+  for (const cab of cabinets) {
+    const u = cab.userData;
+    u.hot += ((cab === hot ? 1 : 0) - u.hot) * (1 - Math.exp(-dt * 10));
+    u.side.emissiveIntensity = 0.25 + u.hot * 0.9;
+    cab.scale.setScalar(1 + u.hot * 0.03);
+    u.shake = Math.max(0, (u.shake || 0) - dt);
+    cab.position.x = u.baseX + Math.sin(t * 80) * 0.03 * u.shake;
+  }
+
+  // The haunted machine: flickering red light and marquee, whispers when you get close
+  for (const cab of cabinets) {
+    const cr = cab.userData.creepy;
+    if (!cr) continue;
+    cr.light.intensity = Math.random() < 0.08 ? 0 : 2 + Math.random() * 2.5;
+    cab.userData.marquee.material.opacity = Math.random() < 0.06 ? 0.15 : 1;
+    const me = (walking || inVR) ? rig.position : camera.position;
+    const near = Math.hypot(me.x - cab.position.x, me.z - cab.position.z);
+    cr.whisperT -= dt;
+    if (near < 3.2 && cr.whisperT <= 0) { whisper(); cr.whisperT = 3 + Math.random() * 4; }
+  }
+
+  // Screens update about 15 times a second (like an old arcade)
+  screenTimer -= dt;
+  if (screenTimer <= 0) { screenTimer = 1 / 15; for (const cab of cabinets) drawScreen(cab, t); }
+
+  // Neon sign flickers now and then
+  sign.material.opacity = (Math.sin(t * 0.7) > 0.97 && Math.random() < 0.5) ? 0.4 : 1;
+  dust.rotation.y = t * 0.01;
+
+  renderer.render(scene, camera);
+});
+
+// Redraw the sign and marquees once the arcade fonts have loaded
+Promise.all([document.fonts.load('150px Monoton'), document.fonts.load('20px "Press Start 2P"')]).then(() => {
+  redraw(signTex, drawSign);
+  for (const cab of cabinets) redraw(cab.userData.marqueeTex, drawMarquee(cab.userData.game));
+}).catch(() => {});
+
+// Coming back from a game: fade back in
+addEventListener('pageshow', () => { launching = false; document.getElementById('fade').classList.remove('on'); });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
