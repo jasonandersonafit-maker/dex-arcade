@@ -472,7 +472,9 @@ function makeZombieDummy(z, x0, x1, speed) {
   const g = new THREE.Group();
   const skin = new THREE.MeshLambertMaterial({ color: 0x7fa860 }), shirt = new THREE.MeshLambertMaterial({ color: 0x5a6b3a }), pants = new THREE.MeshLambertMaterial({ color: 0x2b3448 });
   const box = (w, h, d, m, x, y, zz) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, zz); g.add(b); return b; };
-  const legs = [box(0.18, 0.8, 0.2, pants, -0.12, 0.4, 0), box(0.18, 0.8, 0.2, pants, 0.12, 0.4, 0)];
+  // Legs hang from hip joints so they swing from the top, like real walking
+  const hips = [-0.12, 0.12].map(x => { const hip = new THREE.Group(); hip.position.set(x, 0.8, 0); g.add(hip); return hip; });
+  const legs = hips.map(hip => { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.8, 0.2), pants); leg.position.y = -0.4; hip.add(leg); return leg; });
   const torso = box(0.5, 0.7, 0.28, shirt, 0, 1.15, 0);
   box(0.15, 0.15, 0.6, shirt, -0.33, 1.42, 0.25); box(0.15, 0.15, 0.6, shirt, 0.33, 1.42, 0.25);
   const head = box(0.38, 0.38, 0.38, skin, 0, 1.7, 0);
@@ -500,7 +502,7 @@ function makeZombieDummy(z, x0, x1, speed) {
       if (g.position.x > x1) this.dir = -1; if (g.position.x < x0) this.dir = 1;
       g.rotation.y = this.dir * Math.PI / 2;
       const s = Math.sin(performance.now() / 160);
-      legs[0].rotation.x = s * 0.5; legs[1].rotation.x = -s * 0.5;
+      hips[0].rotation.x = s * 0.5; hips[1].rotation.x = -s * 0.5;
     } };
   registerHits(t);
 }
