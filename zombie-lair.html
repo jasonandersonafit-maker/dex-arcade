@@ -48,7 +48,7 @@
 <div id="hud">
   <h1>ZOMBIE LAIR</h1>
   <p>Stop the zombies before they reach you. Headshots kill in one hit. You have 5 lives. Each level, the zombies get faster, dodge more and start jumping. Every 5th level is a boss fight, and you unlock better guns as you go. <b>Don't shoot the people</b> yelling "HELP!" or you lose a heart.</p>
-  <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). <b>Left stick</b> walks around the yard, <b>right stick</b> turns. Press <b>B</b> for a missile. There's an <b>RPG on your back</b>: reach over your shoulder and squeeze the <b>grip</b> to grab it, pull the trigger to fire, let go of the grip to put it back.</p>
+  <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). Push a <b>thumbstick</b> left or right to slide. Press <b>B</b> for a missile. There's an <b>RPG on your back</b>: reach over your shoulder and squeeze the <b>grip</b> to grab it, pull the trigger to fire, let go of the grip to put it back.</p>
   <p><b>On PC:</b> <b>left click</b> to shoot where the mouse points (hold for rapid fire). <b>A / D</b> or the <b>arrow keys</b> slide you. <b>Right click</b> (or <b>B</b>) fires a missile at the mouse pointer.</p>
   <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>X</b> button on Quest.</p>
 </div>
@@ -104,7 +104,11 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
+const vrButton = VRButton.createButton(renderer);
+document.body.appendChild(vrButton);
+// No VR headset (like on a PC): hide the button instead of showing "VR NOT SUPPORTED"
+if (!navigator.xr) vrButton.style.display = 'none';
+else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) vrButton.style.display = 'none'; }).catch(() => { vrButton.style.display = 'none'; });
 // Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
 const inQuestApp = window.getDigitalGoodsService !== undefined;
 if (inQuestApp && navigator.xr) {
@@ -1746,43 +1750,14 @@ function fireMouseMissile() {
   fireMissile(tmpPos, raycaster.ray.direction);   // fireMissile waits out MISSILE_COOLDOWN between shots
 }
 
-// ---------- Movement ----------
-// VR: walk anywhere in the yard with the left stick, snap turn with the right stick.
-// PC: slide left and right along the rail.
-const VR_WALK_SPEED = 3;
-const YARD = { minX: -RAIL, maxX: RAIL, minZ: -3, maxZ: 3 };   // where you can walk (the Imp waits at -3.8)
-let snapReady = true;
-const headPos = new THREE.Vector3(), walkDir = new THREE.Vector3(), walkSide = new THREE.Vector3();
-function rotateRigAroundHead(angle) {
-  camera.getWorldPosition(headPos);
-  rig.rotation.y += angle;
-  rig.updateMatrixWorld(true);
-  const after = camera.getWorldPosition(new THREE.Vector3());
-  rig.position.x += headPos.x - after.x;
-  rig.position.z += headPos.z - after.z;
-}
+// ---------- Movement: slide left and right along the rail ----------
 function move(dt) {
   let mx = 0;
   if (renderer.xr.isPresenting) {
-    let fx = 0, sx = 0;
     for (const src of renderer.xr.getSession().inputSources) {
       const ax = src.gamepad?.axes; if (!ax || ax.length < 4) continue;
-      if (src.handedness === 'left') { sx = ax[2]; fx = -ax[3]; }
-      if (src.handedness === 'right') {
-        if (Math.abs(ax[2]) > 0.7 && snapReady) { rotateRigAroundHead(-Math.sign(ax[2]) * Math.PI / 6); snapReady = false; }
-        if (Math.abs(ax[2]) < 0.3) snapReady = true;
-      }
+      mx += ax[2];
     }
-    if (Math.hypot(fx, sx) < 0.15) return;
-    // Walk the way your head is facing
-    camera.getWorldDirection(walkDir); walkDir.y = 0; walkDir.normalize();
-    walkSide.set(-walkDir.z, 0, walkDir.x);
-    rig.position.addScaledVector(walkDir, fx * VR_WALK_SPEED * dt).addScaledVector(walkSide, sx * VR_WALK_SPEED * dt);
-    // Stay inside the yard (measured at your head, not the middle of your play space)
-    camera.getWorldPosition(headPos);
-    rig.position.x += THREE.MathUtils.clamp(headPos.x, YARD.minX, YARD.maxX) - headPos.x;
-    rig.position.z += THREE.MathUtils.clamp(headPos.z, YARD.minZ, YARD.maxZ) - headPos.z;
-    return;
   } else {
     if (keys.KeyD || keys.ArrowRight) mx += 1;
     if (keys.KeyA || keys.ArrowLeft) mx -= 1;
