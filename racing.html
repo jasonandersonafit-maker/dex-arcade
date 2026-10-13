@@ -669,11 +669,14 @@ for (let i = 0; i < 2; i++) {
   seat.add(c);
   controllers.push(c);
 }
-let recenterNeeded = false;
+let recenterFrames = 0;   // counts down, then lines your head up with the seat once the headset is tracking
 renderer.xr.addEventListener('sessionstart', () => {
   for (const id of ['hud', 'speed', 'map', 'finishMenu', 'intro']) $(id).hidden = true;
   dash.visible = true;
-  recenterNeeded = true;
+  // Forget the PC chase-camera spot so it can't throw off the seat
+  camera.position.set(0, 0, 0); camera.quaternion.identity();
+  seat.position.set(0, 0, 0); seat.rotation.set(0, 0, 0);
+  recenterFrames = 15;
   if (state === 'intro') startRace();
   const s = renderer.xr.getSession();
   s.addEventListener('visibilitychange', () => { if (s.visibilityState !== 'visible') setPaused(true); });
@@ -681,6 +684,7 @@ renderer.xr.addEventListener('sessionstart', () => {
 renderer.xr.addEventListener('sessionend', () => {
   dash.visible = false; board.visible = false;
   seat.position.set(0, 0, 0); seat.rotation.set(0, 0, 0);
+  camera.fov = 70; camera.updateProjectionMatrix();
   if (state !== 'intro') { for (const id of ['hud', 'speed', 'map']) $(id).hidden = false; setPaused(true); }
   if (state === 'finished') $('finishMenu').hidden = false;
 });
@@ -939,7 +943,7 @@ let lapMsgT = 0, lapMsg = '';
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
   const inVR = renderer.xr.isPresenting;
-  if (inVR && recenterNeeded && camera.position.lengthSq() > 0.01) { recenterSeat(); recenterNeeded = false; }
+  if (inVR && recenterFrames > 0 && --recenterFrames === 0) recenterSeat();
 
   let input = { gas: 0, brake: 0, steer: 0, drift: false };
   if (inVR) input = readVR();
