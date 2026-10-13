@@ -27,6 +27,9 @@
   #pauseMenu button { font:600 16px system-ui, sans-serif; color:var(--fg); background:#0e1a12; border:1px solid #23402a;
                       border-radius:8px; padding:10px 16px; cursor:pointer; }
   #pauseMenu button.primary { background:var(--accent); color:#05070c; border-color:var(--accent); }
+  /* Secret invincibility badge (type 7655) */
+  #godBadge { position:fixed; left:16px; bottom:16px; font:800 14px system-ui, sans-serif; letter-spacing:.1em; color:#ffd23d;
+              background:rgba(5,7,12,.8); border:2px solid #ffd23d; border-radius:8px; padding:6px 10px; pointer-events:none; }
   /* Secret level select (type 7656) */
   #levelPick { position:fixed; inset:0; display:grid; place-items:center; background:rgba(5,7,12,.7); padding:16px; z-index:10; }
   #levelPick .card { background:rgba(5,7,12,.96); border:2px solid #ffd23d; border-radius:12px; padding:22px 24px;
@@ -50,6 +53,7 @@
   <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>X</b> button on Quest.</p>
 </div>
 <button id="pauseBtn" type="button">❚❚ Pause</button>
+<div id="godBadge" hidden>★ INVINCIBLE</div>
 <div id="pauseMenu" hidden>
   <div class="card">
     <h2>PAUSED</h2>
@@ -1292,6 +1296,10 @@ camera.add(hurtSphere);
 
 function playerHit(amount = 1) {
   if (gameOver || victory) return;
+  if (invincible) {   // secret code 7655: nothing can hurt you
+    beep(1200, 0.08, 'sine', 0.08);
+    return;
+  }
   lives = Math.max(0, lives - amount);
   hurtSphere.material.opacity = 0.5;
   beep(90, 0.5, 'square', 0.25);
@@ -1382,7 +1390,18 @@ addEventListener('keydown', e => {
   if (!/^[0-9]$/.test(e.key)) return;
   typed = (typed + e.key).slice(-SECRET_CODE.length);
   if (typed === SECRET_CODE && levelPick.hidden) { typed = ''; openLevelPick(); }
+  if (typed === GOD_CODE) { typed = ''; toggleInvincible(); }
 });
+
+// ---------- Secret invincibility: type 7655 (type it again to turn it off) ----------
+const GOD_CODE = '7655';
+let invincible = false;
+function toggleInvincible() {
+  invincible = !invincible;
+  document.getElementById('godBadge').hidden = !invincible;
+  showBanner(invincible ? 'INVINCIBLE!' : 'INVINCIBLE OFF', invincible ? 'nothing can hurt you · type 7655 again to turn off' : 'you can get hurt again', '#ffd23d');
+  [523, 784, 1047].forEach((f, i) => setTimeout(() => beep(invincible ? f : 1047 - i * 200, 0.15, 'triangle', 0.12), i * 90));
+}
 // Leave the game and go back to the arcade title screen
 // The app's file viewer can't switch pages; if the page didn't change, explain where to play instead
 function cantSwitchPagesNotice() {
