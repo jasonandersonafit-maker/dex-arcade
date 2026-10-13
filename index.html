@@ -64,7 +64,7 @@ const GAMES = [
   { title: "KING'S CHASE", file: 'kings-chase.html', color: '#ffc830', blurb: 'Outrun the Zombie King', screen: 'chase' },
   { title: 'SKY PARKOUR', file: 'sky-parkour.html', color: '#33f0ff', blurb: 'Jump across a course in the clouds', screen: 'parkour' },
   { title: 'HAUNTED MAZE', file: 'haunted-maze.html', color: '#b07dff', blurb: "DO NOT USE. You've been warned...", screen: 'maze', corner: true },
-  { title: 'SANDBOX RANGE', file: 'sandbox-range.html', color: '#ff7a3d', blurb: '9 weapons, blow everything up', screen: 'sandbox' },
+  { title: 'SANDBOX RANGE', file: 'sandbox-range.html', color: '#ff7a3d', blurb: '15 weapons and a tank!', screen: 'sandbox' },
   { title: 'SWORD ARENA', file: 'sword-arena.html', color: '#ff4d6d', blurb: 'Defeat 3 knights to be champion', screen: 'sword' },
 ];
 const ARCADE_NAME = 'DEX ARCADE';
@@ -497,7 +497,7 @@ function drawScreen(cab, t) {
 const menu = document.getElementById('menu');
 // A button for each playable game, plus one note for the machines still to come
 const buttons = GAMES.map((game, i) => {
-  if (!game.file) return null;
+  if (!game.file || game.corner) return null;   // the haunted corner machine has no menu button: you have to find it
   const b = document.createElement('button');
   b.className = 'game';
   b.type = 'button';
