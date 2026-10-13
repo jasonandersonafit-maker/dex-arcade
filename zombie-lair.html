@@ -27,6 +27,18 @@
   #pauseMenu button { font:600 16px system-ui, sans-serif; color:var(--fg); background:#0e1a12; border:1px solid #23402a;
                       border-radius:8px; padding:10px 16px; cursor:pointer; }
   #pauseMenu button.primary { background:var(--accent); color:#05070c; border-color:var(--accent); }
+  /* Secret level select (type 7656) */
+  #levelPick { position:fixed; inset:0; display:grid; place-items:center; background:rgba(5,7,12,.7); padding:16px; z-index:10; }
+  #levelPick .card { background:rgba(5,7,12,.96); border:2px solid #ffd23d; border-radius:12px; padding:22px 24px;
+                     display:flex; flex-direction:column; gap:14px; max-width:min(460px, 100%); text-align:center; }
+  #levelPick h2 { margin:0; font-size:22px; letter-spacing:.12em; color:#ffd23d; }
+  #levelPick p { margin:0; color:var(--muted); font-size:12px; }
+  #levelGrid { display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; }
+  #levelGrid button, #levelPick .close { font:700 16px system-ui, sans-serif; color:var(--fg); background:#0e1a12; border:1px solid #23402a;
+                     border-radius:8px; padding:10px 4px; cursor:pointer; line-height:1.2; }
+  #levelGrid button small { display:block; font-size:9px; font-weight:600; color:#ff8a8a; letter-spacing:.06em; }
+  #levelGrid button.boss { border-color:#ff3d3d; background:#2a0d12; }
+  #levelGrid button:hover, #levelGrid button:focus-visible, #levelPick .close:hover { border-color:#ffd23d; outline:none; }
 </style>
 </head>
 <body>
@@ -45,6 +57,14 @@
     <button id="restartBtn" type="button">Restart</button>
     <button id="arcadeBtn" type="button">Back to Arcade</button>
     <p>Press P or Esc to resume</p>
+  </div>
+</div>
+<div id="levelPick" hidden>
+  <div class="card">
+    <h2>LEVEL SELECT</h2>
+    <p>Test mode: pick a level to jump to. You start with full hearts and that level's gun.</p>
+    <div id="levelGrid"></div>
+    <button class="close" id="levelCancel" type="button">Cancel</button>
   </div>
 </div>
 
@@ -1329,6 +1349,40 @@ function setPaused(p) {
 document.getElementById('pauseBtn').addEventListener('click', () => setPaused(true));
 document.getElementById('resumeBtn').addEventListener('click', () => setPaused(false));
 document.getElementById('restartBtn').addEventListener('click', () => { restart(); setPaused(false); });
+
+// ---------- Secret level select: type 7656 ----------
+const SECRET_CODE = '7656';
+let typed = '';
+const levelPick = document.getElementById('levelPick');
+for (let n = 1; n <= FINAL_LEVEL; n++) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  const bossName = isBossLevel(n) ? { brute: 'BRUTE', imp: 'IMP', king: 'KING' }[bossKind(n)] : '';
+  b.innerHTML = n + (bossName ? `<small>${bossName}</small>` : '');
+  if (bossName) b.className = 'boss';
+  b.addEventListener('click', () => jumpToLevel(n));
+  document.getElementById('levelGrid').appendChild(b);
+}
+function openLevelPick() {
+  if (renderer.xr.isPresenting) return;
+  setPaused(true);
+  document.getElementById('pauseMenu').hidden = true;   // show the level picker instead of the pause menu
+  levelPick.hidden = false;
+  levelPick.querySelector('#levelGrid button').focus();
+}
+function closeLevelPick() { levelPick.hidden = true; setPaused(false); }
+function jumpToLevel(n) {
+  levelPick.hidden = true;
+  restart();                          // fresh start: full hearts, no zombies
+  level = n - 1; levelBreak = 0.01;   // the next frame starts level n (with its banner and gun)
+  setPaused(false);
+}
+document.getElementById('levelCancel').addEventListener('click', closeLevelPick);
+addEventListener('keydown', e => {
+  if (!/^[0-9]$/.test(e.key)) return;
+  typed = (typed + e.key).slice(-SECRET_CODE.length);
+  if (typed === SECRET_CODE && levelPick.hidden) { typed = ''; openLevelPick(); }
+});
 // Leave the game and go back to the arcade title screen
 // The app's file viewer can't switch pages; if the page didn't change, explain where to play instead
 function cantSwitchPagesNotice() {
@@ -1349,6 +1403,7 @@ addEventListener('keydown', e => {
   const k = (e.key || '').toLowerCase();
   if ((k === 'p' || k === 'escape' || e.code === 'KeyP' || e.code === 'Escape') && !e.repeat) {
     e.preventDefault();
+    if (!levelPick.hidden) { closeLevelPick(); return; }   // P / Esc closes the level select
     setPaused(!paused);
   }
 });
