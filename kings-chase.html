@@ -41,6 +41,8 @@
   .sens input { width:100%; accent-color:#7a8ad8; }
   a.back { font-size:9px; color:var(--muted); }
   #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
+  /* Buttons on the "DANCE PARTY!" / "THE KING GOT YOU!" screens */
+  #endMenu { position:fixed; left:0; right:0; bottom:84px; display:flex; justify-content:center; flex-wrap:wrap; gap:12px; padding:0 16px; }
 </style>
 </head>
 <body>
@@ -67,6 +69,10 @@
   </div>
 </div>
 
+<div id="endMenu" hidden>
+  <button id="againBtn" class="mc" type="button">PLAY AGAIN</button>
+  <button id="endArcadeBtn" class="mc" type="button">BACK TO ARCADE</button>
+</div>
 <div id="pauseMenu" class="overlay" hidden>
   <div class="card">
     <h2>PAUSED</h2>
@@ -114,6 +120,16 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+// Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
+const inQuestApp = window.getDigitalGoodsService !== undefined;
+if (inQuestApp && navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (!ok || renderer.xr.isPresenting) return;
+    navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] })
+      .then(s => { if (!renderer.xr.isPresenting) renderer.xr.setSession(s); else s.end(); })
+      .catch(() => {});
+  });
+}
 
 const scene = new THREE.Scene();
 const FOG = new THREE.Color(0xe89a80);
@@ -617,6 +633,7 @@ function startGame() {
   resetWorld();
   state = 'countdown'; stateT = 0; runT = 0;
   $('intro').hidden = true;
+  $('endMenu').hidden = true;
   $('hud').hidden = renderer.xr.isPresenting;
   $('cross').hidden = renderer.xr.isPresenting;
   $('pauseBtn').hidden = false;
@@ -627,6 +644,9 @@ function startGame() {
 
 function endGame(won) {
   state = won ? 'escaped' : 'caught';
+  // Free the mouse and show "Play again" / "Back to arcade" buttons
+  if (document.pointerLockElement) document.exitPointerLock();
+  $('endMenu').hidden = renderer.xr.isPresenting;
   stateT = 0;
   if (won) {
     showMessage('DANCE PARTY!', `you escaped in ${runT.toFixed(1)}s · ${pressToRestart()}`, '#ff3df2');
@@ -639,7 +659,7 @@ function endGame(won) {
     beep(200, 0.6, 'sawtooth', 0.2);
   }
 }
-const pressToRestart = () => renderer.xr.isPresenting ? 'trigger to retry' : 'click to retry';
+const pressToRestart = () => renderer.xr.isPresenting ? 'trigger to retry  -  Y for arcade' : 'click to retry';
 
 // ---------- Mouse look (Minecraft style) ----------
 let locked = false, freeLook = false;
@@ -738,10 +758,12 @@ function cantSwitchPagesNotice() {
 }
 function goToArcade() {
   const go = () => { location.href = 'index.html'; setTimeout(cantSwitchPagesNotice, 700); };
-  if (renderer.xr.isPresenting) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  if (renderer.xr.isPresenting && !inQuestApp) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
   else go();
 }
 $('arcadeBtn').addEventListener('click', goToArcade);
+$('endArcadeBtn').addEventListener('click', goToArcade);
+$('againBtn').addEventListener('click', () => startGame());
 $('playBtn').addEventListener('click', startGame);
 document.addEventListener('visibilitychange', () => { if (document.hidden && state !== 'intro') setPaused(true); });
 
@@ -779,7 +801,8 @@ function readVR(dt) {
       const x = !!pad.buttons[4]?.pressed;
       if (x && !c.userData.xWas) setPaused(!paused);
       c.userData.xWas = x;
-      if (paused && pad.buttons[5]?.pressed) goToArcade();
+      const over = (state === 'caught' || state === 'escaped') && stateT > 1.2;
+      if ((paused || over) && pad.buttons[5]?.pressed) goToArcade();
     }
     if (src.handedness === 'right' && ax.length >= 4) {
       if (pad.buttons[4]?.pressed) out.jump = true;                // A button
