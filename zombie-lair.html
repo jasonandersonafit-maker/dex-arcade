@@ -48,7 +48,7 @@
 <div id="hud">
   <h1>ZOMBIE LAIR</h1>
   <p>Stop the zombies before they reach you. Headshots kill in one hit. You have 5 lives. Each level, the zombies get faster, dodge more and start jumping. Every 5th level is a boss fight, and you unlock better guns as you go. <b>Don't shoot the people</b> yelling "HELP!" or you lose a heart.</p>
-  <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). Push a <b>thumbstick</b> left or right to slide. Press <b>B</b> for a missile. There's an <b>RPG on your back</b>: reach over your shoulder and squeeze the <b>grip</b> to grab it, pull the trigger to fire, let go of the grip to put it back.</p>
+  <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). You stand your ground (no sliding). Press <b>B</b> for a missile. There's an <b>RPG on your back</b>: reach over your shoulder and squeeze the <b>grip</b> to grab it, pull the trigger to fire, let go of the grip to put it back.</p>
   <p><b>On PC:</b> <b>left click</b> to shoot where the mouse points (hold for rapid fire). <b>A / D</b> or the <b>arrow keys</b> slide you. <b>Right click</b> (or <b>B</b>) fires a missile at the mouse pointer.</p>
   <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>X</b> button on Quest.</p>
 </div>
@@ -1750,18 +1750,12 @@ function fireMouseMissile() {
   fireMissile(tmpPos, raycaster.ray.direction);   // fireMissile waits out MISSILE_COOLDOWN between shots
 }
 
-// ---------- Movement: slide left and right along the rail ----------
+// ---------- Movement: slide left and right along the rail (PC only; in VR you stand your ground) ----------
 function move(dt) {
+  if (renderer.xr.isPresenting) return;
   let mx = 0;
-  if (renderer.xr.isPresenting) {
-    for (const src of renderer.xr.getSession().inputSources) {
-      const ax = src.gamepad?.axes; if (!ax || ax.length < 4) continue;
-      mx += ax[2];
-    }
-  } else {
-    if (keys.KeyD || keys.ArrowRight) mx += 1;
-    if (keys.KeyA || keys.ArrowLeft) mx -= 1;
-  }
+  if (keys.KeyD || keys.ArrowRight) mx += 1;
+  if (keys.KeyA || keys.ArrowLeft) mx -= 1;
   if (Math.abs(mx) < 0.15) mx = 0;
   rig.position.x = THREE.MathUtils.clamp(rig.position.x + THREE.MathUtils.clamp(mx, -1, 1) * 5 * dt, -RAIL, RAIL);
 }
