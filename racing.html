@@ -333,8 +333,13 @@ const WALL = ROAD_WIDTH / 2 + 4.2;     // how far from the middle the walls are
   const tires = new THREE.InstancedMesh(tireGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), spots.length * 2);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
   let n = 0;
+  const clear = (ROAD_WIDTH / 2 + 2.6) ** 2;   // tires must stay off the road and curbs
   for (const [i, side] of spots) {
     const base = P[i].clone().addScaledVector(NL[i], side * (WALL + 0.4));
+    // On the inside of tight corners the wall line folds back over the road: leave those tires out
+    let onRoad = false;
+    for (let j = 0; j < N; j += 2) if ((P[j].x - base.x) ** 2 + (P[j].z - base.z) ** 2 < clear) { onRoad = true; break; }
+    if (onRoad) continue;
     for (let layer = 0; layer < 2; layer++) {
       e.set(Math.PI / 2, 0, 0); q.setFromEuler(e);
       v.copy(base).setY(0.2 + layer * 0.38);
@@ -344,6 +349,7 @@ const WALL = ROAD_WIDTH / 2 + 4.2;     // how far from the middle the walls are
       n++;
     }
   }
+  tires.count = n;   // only draw the tires we actually placed
   scene.add(tires);
 }
 // The jump ramp: yellow and black stripes
