@@ -787,6 +787,52 @@ function spawnZombie() {
 
 // ---------- Bosses ----------
 let bossSpawned = false;
+// The Zombie King's army
+const KING_WAVES = [4, 5, 6, 7, 8];   // minions in each of the 5 waves
+let kingBoss = null, kingWave = 0, waveQueue = 0, waveTimer = 0;
+function kingRoar() { beep(70, 1.2, 'sawtooth', 0.3); noise(1.2, 'lowpass', 250, 0.6); groan(); }
+function updateKingWaves(dt) {
+  const k = kingBoss;
+  if (!k || k.userData.dead || gameOver || victory || k.userData.rising) return;
+  const u = k.userData;
+  // Minions waiting to climb out of the ground come out one at a time
+  if (waveQueue > 0) {
+    waveTimer -= dt;
+    if (waveTimer <= 0) { spawnZombie(); waveQueue--; waveTimer = 0.5; }
+    return;
+  }
+  if (u.summoning) {
+    const minions = zombies.filter(z => !z.userData.dead && !z.userData.boss).length;
+    if (minions > 0) { waveTimer = 2.5; return; }   // a short breather after each wave is cleared
+    waveTimer -= dt;
+    if (waveTimer > 0) return;
+    if (kingWave < KING_WAVES.length) {
+      kingWave++;
+      waveQueue = KING_WAVES[kingWave - 1]; waveTimer = 0.3;
+      showBanner(`WAVE ${kingWave}/${KING_WAVES.length}`, 'the King summons his army!', '#b07dff');
+      kingRoar();
+    } else {
+      // All 5 waves beaten: the shield shatters
+      u.summoning = false;
+      u.shield.visible = false;
+      explode(chest(k), 0xb07dff, 70, 10, 0.1);
+      noise(0.8, 'highpass', 2000, 0.4);
+      showBanner('THE KING FIGHTS!', 'his shield is broken... attack!', '#ff3d3d');
+      kingRoar();
+      drawBoard();
+    }
+  } else {
+    // He calls for help at half health and at a quarter
+    for (const [frac, key] of [[0.5, 'helpHalf'], [0.25, 'helpQuarter']]) {
+      if (!u[key] && u.hp <= u.maxHp * frac) {
+        u[key] = true;
+        waveQueue = 4; waveTimer = 0.2;
+        showBanner('THE KING CALLS FOR HELP!', 'more minions are coming', '#b07dff');
+        kingRoar();
+      }
+    }
+  }
+}
 function spawnBoss() {
   bossSpawned = true;
   const kind = bossKind(level);
@@ -798,22 +844,28 @@ function spawnBoss() {
   const u = z.userData;
   u.boss = kind;
   if (kind === 'king') {
-    // The final boss: does a bit of everything
+    // The final boss: first summons 5 waves of minions behind a magic shield, then fights you himself
     u.size = 2;
-    u.maxHp = 300;
-    u.headMult = 2;
-    u.speed = 0.55;
-    u.track = 0.8;
-    u.weaveAmp = 2;
-    u.weaveFreq = 1.1;
-    u.jumpChance = 0.2;
+    u.maxHp = 500;
+    u.headMult = 1.5;
+    u.speed = 0.7;
+    u.track = 1.0;
+    u.weaveAmp = 2.4;
+    u.weaveFreq = 1.2;
+    u.jumpChance = 0.25;
     u.jumpPower = 4;
     u.damage = 2;
     u.shotKind = 'mixed';                    // boulders AND glowing orbs
-    u.shootEvery = 1.6;
-    u.chargeEvery = 8;
-    u.chargeT = 6;
+    u.shootEvery = 1.1;
+    u.chargeEvery = 6;
+    u.chargeT = 5;
     u.charging = 0;
+    u.summoning = true;                      // can't be hurt until all 5 waves are beaten
+    const shield = new THREE.Mesh(new THREE.SphereGeometry(0.85, 24, 16), new THREE.MeshBasicMaterial({ color: 0xb07dff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false }));
+    shield.position.y = 1.0;
+    z.add(shield);
+    u.shield = shield;
+    kingBoss = z; kingWave = 0; waveQueue = 0; waveTimer = 4;
     // Gold crown with spikes
     const gold = new THREE.MeshStandardMaterial({ color: 0xffc830, emissive: 0x664400, metalness: 0.8, roughness: 0.3 });
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.21, 0.1, 8, 1, true), gold);
@@ -1034,6 +1086,12 @@ function damageZombie(z, dmg, point) {
   const u = z.userData;
   if (u.person) { personHit(z); return; }
   if (u.dead) return;
+  if (u.summoning) {   // the King's shield: shots just spark off
+    explode(point, 0xb07dff, 6, 3, 0.04);
+    beep(1500, 0.06, 'sine', 0.06);
+    u.shield.material.opacity = 0.55;
+    return;
+  }
   u.hp -= dmg;
   u.hitT = 0.1;
   explode(point, 0x4f9a2a, 10, 4, 0.05);   // green zombie goo
@@ -1046,7 +1104,7 @@ function killZombie(z) {
   if (z.userData.dead) return;
   z.userData.dead = true;
   kills++;
-  levelKills++;
+  if (!isBossLevel(level) || z.userData.boss) levelKills++;   // on boss levels only the boss counts
   noise(0.3, 'lowpass', 400, 0.4);
   if (z.userData.boss) {
     // Big finish
@@ -1055,7 +1113,7 @@ function killZombie(z) {
     explode(chest(z), 0xffb030, 40, 8, 0.08);
     noise(1.2, 'lowpass', 300, 0.8);
   }
-  if (levelKills >= levelGoal(level) && levelBreak <= 0) completeLevel();
+  if (!gameOver && levelKills >= levelGoal(level) && levelBreak <= 0) completeLevel();   // no winning after you've lost
   drawBoard();
 }
 
@@ -1187,6 +1245,7 @@ function startNextLevel() {
   level++;
   levelKills = 0;
   bossSpawned = false;
+  kingBoss = null; kingWave = 0; waveQueue = 0;
   if (isBossLevel(level)) {
     showBanner('BOSS: ' + BOSS_NAMES[bossKind(level)], level === FINAL_LEVEL ? 'the final battle!' : 'level ' + level, '#ff3d3d');
     beep(80, 1.2, 'sawtooth', 0.2);
@@ -1231,6 +1290,7 @@ function restart() {
   clearEnemyShots();
   kills = 0; lives = START_LIVES; gameOver = false;
   level = 1; levelKills = 0; levelBreak = 0; bossSpawned = false;
+  kingBoss = null; kingWave = 0; waveQueue = 0;
   setWeapon(WEAPONS[0]);
   showBanner('LEVEL 1', 'stop ' + levelGoal(1) + ' zombies');
   drawBoard();
@@ -1571,6 +1631,7 @@ function updateZombies(dt) {
   if (isBossLevel(level)) {
     // Boss levels: just the boss, nobody else
     if (!gameOver && !victory && levelBreak <= 0 && !bossSpawned && spawnTimer <= 0) spawnBoss();
+    updateKingWaves(dt);   // the Zombie King's minion waves
   } else if (!gameOver && !victory && levelBreak <= 0 && alive < Math.min(maxAlive, stillNeeded) && spawnTimer <= 0) {
     spawnZombie();
     spawnTimer = Math.max(0.6, 1.6 - level * 0.05) + Math.random();
@@ -1599,6 +1660,16 @@ function updateZombies(dt) {
       u.headPivot.rotation.z = Math.sin(clock.elapsedTime * 8) * 0.15;
       if (Math.random() < dt * 8) explode(z.position.clone().setY(0.1), 0x4a3526, 2, 2, 0.06);
       if (z.position.y >= 0) { z.position.y = 0; u.rising = false; }
+      continue;
+    }
+
+    // The King stands at the gate casting while his shield is up
+    if (u.summoning) {
+      u.arms[0].rotation.x = u.arms[1].rotation.x = -Math.PI * 0.9 + Math.sin(clock.elapsedTime * 3) * 0.15;
+      u.headPivot.rotation.z = Math.sin(clock.elapsedTime * 1.5) * 0.2;
+      u.shield.material.opacity = Math.max(0.2 + Math.sin(clock.elapsedTime * 4) * 0.06, u.shield.material.opacity - dt * 1.5);
+      u.shield.rotation.y += dt;
+      z.rotation.y = 0;
       continue;
     }
 

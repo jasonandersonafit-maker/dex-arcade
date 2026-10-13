@@ -525,10 +525,14 @@ makeZombieDummy(-42, -8, 14, 1.2);
   g.add(body, head, post, arms, facePlane);
   g.position.set(0, 0, -58);
   scene.add(g);
+  // One health bar: the dark back and red front live in the same group, so they always stay stacked together
+  const bar = new THREE.Group();
+  bar.position.set(0, 6.6, -58);
   const barBg = new THREE.Mesh(new THREE.PlaneGeometry(4, 0.35), new THREE.MeshBasicMaterial({ color: 0x3a0d14 }));
   const barFg = new THREE.Mesh(new THREE.PlaneGeometry(4, 0.35), new THREE.MeshBasicMaterial({ color: 0xff3d3d }));
-  barBg.position.set(0, 6.6, -58); barFg.position.set(0, 6.6, -57.99);
-  scene.add(barBg, barFg);
+  barFg.position.z = 0.02;   // just in front of the back
+  bar.add(barBg, barFg);
+  scene.add(bar);
   const MAX = 1000;
   const t = { hits: [body, head, arms], hp: MAX, dead: 0, wobble: 0,
     hit(point, dmg, mesh) {
@@ -541,18 +545,18 @@ makeZombieDummy(-42, -8, 14, 1.2);
     },
     blast(pos, power) { this.hit(g.position.clone().setY(3), power / 3, body); },
     destroy() {
-      this.dead = 6; g.visible = false; barBg.visible = barFg.visible = false; this.active = false;
+      this.dead = 6; g.visible = false; bar.visible = false; this.active = false;
       addScore(1000);
       explode(g.position.clone().setY(3), 6, 0, true);
       shatter(g.position.clone().setY(3), 0xe0c890, 60, 10, 0.2, 2.5);
     },
     update(dt) {
-      if (this.dead > 0) { this.dead -= dt; if (this.dead <= 0) { this.hp = MAX; g.visible = true; barBg.visible = barFg.visible = true; this.active = true; } return; }
+      if (this.dead > 0) { this.dead -= dt; if (this.dead <= 0) { this.hp = MAX; g.visible = true; bar.visible = true; this.active = true; } return; }
       this.wobble = Math.max(0, this.wobble - dt * 2);
       g.rotation.z = Math.sin(performance.now() / 60) * 0.08 * this.wobble;
       const f = Math.max(0, this.hp / MAX);
-      barFg.scale.x = Math.max(0.001, f); barFg.position.x = -(1 - f) * 2;
-      barBg.lookAt(camera.getWorldPosition(new THREE.Vector3())); barFg.quaternion.copy(barBg.quaternion);
+      barFg.scale.x = Math.max(0.001, f); barFg.position.x = -(1 - f) * 2;   // shrinks toward the left as it loses health
+      bar.lookAt(camera.getWorldPosition(new THREE.Vector3()));             // the whole bar turns to face you
     } };
   registerHits(t);
 }
