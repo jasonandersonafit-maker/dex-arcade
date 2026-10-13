@@ -134,14 +134,23 @@ function vrPauseButtons() {
   if (y && !vrYWasDown) setPaused(!paused);
   vrYWasDown = y;
   if (paused && b) goToArcade();
-}// The Quest sticks can drift a little on their own, so small pushes are ignored (a "dead zone").
-// You only move once the stick is really pushed. Raise this number if you still drift, lower it if steering feels sluggish.
-const STICK_DEAD_ZONE = 0.35;
-function stickDeadZone(axes) {
-  const out = Array.from(axes);
+}// Stick calibration. On most headsets this changes nothing. If a stick drifts, hold both grip buttons for
+// 2 seconds in the arcade (sticks let go): that headset remembers where its sticks rest, and every game
+// treats that spot as the middle. It's saved only on that headset.
+let stickRest = {};
+try { stickRest = JSON.parse(localStorage.getItem('dexStickRest') || '{}'); } catch (e) {}
+const STICK_DEAD_ZONE = 0.12;   // tiny pushes are ignored
+function recenterAxis(v, rest) {
+  if (v >= rest) return rest >= 0.99 ? 0 : (v - rest) / (1 - rest);
+  return rest <= -0.99 ? 0 : (v - rest) / (1 + rest);
+}
+function stickDeadZone(axes, hand) {
+  const out = Array.from(axes), rest = stickRest[hand];
   for (const i of [0, 2]) {
-    const x = out[i] || 0, y = out[i + 1] || 0, len = Math.hypot(x, y);
-    const k = len < STICK_DEAD_ZONE ? 0 : (len - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE) / len;
+    let x = out[i] || 0, y = out[i + 1] || 0;
+    if (rest) { x = recenterAxis(x, rest[i] || 0); y = recenterAxis(y, rest[i + 1] || 0); }
+    const len = Math.hypot(x, y);
+    const k = len < STICK_DEAD_ZONE ? 0 : Math.min(1, (len - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE)) / len;
     out[i] = x * k; out[i + 1] = y * k;
   }
   return out;
@@ -905,7 +914,7 @@ function readVR() {
   for (const c of controllers) {
     const src = c.userData.input, pad = src?.gamepad;
     if (!pad) continue;
-    const ax = stickDeadZone(pad.axes);
+    const ax = stickDeadZone(pad.axes, src.handedness);
     if (src.handedness === 'left' && ax.length >= 4) {
       out.sx = ax[2]; out.fx = -ax[3];
       const x = !!pad.buttons[4]?.pressed;

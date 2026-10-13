@@ -82,14 +82,23 @@ document.body.appendChild(vrButton);
 if (!navigator.xr) vrButton.style.display = 'none';
 else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) vrButton.style.display = 'none'; }).catch(() => { vrButton.style.display = 'none'; });
 // Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
-// The Quest sticks can drift a little on their own, so small pushes are ignored (a "dead zone").
-// You only move once the stick is really pushed. Raise this number if you still drift, lower it if steering feels sluggish.
-const STICK_DEAD_ZONE = 0.35;
-function stickDeadZone(axes) {
-  const out = Array.from(axes);
+// Stick calibration. On most headsets this changes nothing. If a stick drifts, hold both grip buttons for
+// 2 seconds in the arcade (sticks let go): that headset remembers where its sticks rest, and every game
+// treats that spot as the middle. It's saved only on that headset.
+let stickRest = {};
+try { stickRest = JSON.parse(localStorage.getItem('dexStickRest') || '{}'); } catch (e) {}
+const STICK_DEAD_ZONE = 0.12;   // tiny pushes are ignored
+function recenterAxis(v, rest) {
+  if (v >= rest) return rest >= 0.99 ? 0 : (v - rest) / (1 - rest);
+  return rest <= -0.99 ? 0 : (v - rest) / (1 + rest);
+}
+function stickDeadZone(axes, hand) {
+  const out = Array.from(axes), rest = stickRest[hand];
   for (const i of [0, 2]) {
-    const x = out[i] || 0, y = out[i + 1] || 0, len = Math.hypot(x, y);
-    const k = len < STICK_DEAD_ZONE ? 0 : (len - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE) / len;
+    let x = out[i] || 0, y = out[i + 1] || 0;
+    if (rest) { x = recenterAxis(x, rest[i] || 0); y = recenterAxis(y, rest[i + 1] || 0); }
+    const len = Math.hypot(x, y);
+    const k = len < STICK_DEAD_ZONE ? 0 : Math.min(1, (len - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE)) / len;
     out[i] = x * k; out[i + 1] = y * k;
   }
   return out;
@@ -751,7 +760,7 @@ function updateWalk(dt, inVR) {
   let fx = 0, sx = 0, jump = false;
   if (inVR) {
     for (const c of controllers) {
-      const src = c.userData.input, ax = src?.gamepad && stickDeadZone(src.gamepad.axes);
+      const src = c.userData.input, ax = src?.gamepad && stickDeadZone(src.gamepad.axes, src.handedness);
       if (!ax || ax.length < 4) continue;
       if (src.handedness === 'left') { sx = ax[2]; fx = -ax[3]; }
       if (src.handedness === 'right') {
@@ -827,6 +836,51 @@ for (let i = 0; i < 2; i++) {
   controllers.push(c);
 }
 
+// ---------- Stick calibration (VR): let go of both sticks and hold both grips for 2 seconds ----------
+const calCanvas = document.createElement('canvas'); calCanvas.width = 768; calCanvas.height = 192;
+const calTex = new THREE.CanvasTexture(calCanvas); calTex.colorSpace = THREE.SRGBColorSpace;
+const calSign = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.225), new THREE.MeshBasicMaterial({ map: calTex, transparent: true, depthTest: false }));
+calSign.position.set(0, -0.1, -1.1); calSign.renderOrder = 1000; calSign.visible = false;
+camera.add(calSign);
+let calHoldT = 0, calShowT = 0, calText = '';
+function showCalSign(line1, line2) {
+  const key = line1 + line2;
+  if (key !== calText) {
+    calText = key;
+    const g = calCanvas.getContext('2d');
+    g.clearRect(0, 0, 768, 192);
+    g.fillStyle = 'rgba(10,8,30,0.92)'; g.fillRect(0, 0, 768, 192);
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#33f0ff'; g.font = '36px "Press Start 2P", monospace'; g.fillText(line1, 384, 70);
+    g.fillStyle = '#ffffff'; g.font = '18px "Press Start 2P", monospace'; g.fillText(line2, 384, 140);
+    calTex.needsUpdate = true;
+  }
+  calSign.visible = true;
+}
+function checkStickCalibration(dt) {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  const grips = {}, raw = {};
+  for (const src of session.inputSources) {
+    if (!src.gamepad || !src.handedness) continue;
+    grips[src.handedness] = !!src.gamepad.buttons[1]?.pressed;
+    raw[src.handedness] = Array.from(src.gamepad.axes);
+  }
+  if (grips.left && grips.right) {
+    calHoldT += dt;
+    if (calHoldT < 2) showCalSign('CALIBRATING...', 'let go of both sticks and keep holding');
+    else if (calHoldT - dt < 2) {
+      stickRest = { left: raw.left || [0, 0, 0, 0], right: raw.right || [0, 0, 0, 0] };
+      try { localStorage.setItem('dexStickRest', JSON.stringify(stickRest)); } catch (e) {}
+      for (const c of controllers) c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.8, 200);
+      [523, 784, 1047].forEach((f, i) => setTimeout(() => beep(f, 0.12), i * 90));
+      calShowT = 3;
+    }
+  } else calHoldT = 0;
+  if (calShowT > 0) { calShowT -= dt; showCalSign('STICKS CALIBRATED!', 'saved on this headset for every game'); }
+  else if (calHoldT === 0) calSign.visible = false;
+}
+
 // ---------- Main loop ----------
 const clock = new THREE.Clock();
 const lookTarget = new THREE.Vector3(0, 1.45, -3);
@@ -840,6 +894,7 @@ renderer.setAnimationLoop(() => {
   // Which machine is being pointed at?
   let hot = null;
   if (inVR) {
+    checkStickCalibration(dt);
     updateWalk(dt, true);   // walk around with the left stick, snap-turn with the right
     for (const c of controllers) {
       c.getWorldPosition(tmpPos); c.getWorldQuaternion(tmpQuat);
