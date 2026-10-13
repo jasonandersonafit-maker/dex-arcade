@@ -62,7 +62,7 @@
     <div class="foes"><span style="color:#7dff6b">1. THE SQUIRE</span><span style="color:#d8e0f0">2. THE KNIGHT</span><span style="color:#ff5050">3. THE BLACK KNIGHT</span></div>
     <div class="controls">
       <div><b>PC</b>Left click: swing sword<br>Hold right click: block<br>Block just before a hit: PARRY!<br>Shift: dash · Space: jump<br>W A S D: move · P: pause</div>
-      <div><b>QUEST</b>Swing your arm to attack<br>(harder swings hit harder)<br>Put your sword in the way<br>of theirs to block<br>Left stick: move · X: pause</div>
+      <div><b>QUEST</b>Swing your arm to attack<br>(harder swings hit harder)<br>Block with the shield on your<br>left arm (or your sword)<br>Shove it as they hit: PARRY!<br>Left stick: move · X: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">ENTER THE ARENA</button>
     <a class="back" href="index.html">← Back to Arcade</a>
@@ -117,7 +117,11 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
-document.body.appendChild(VRButton.createButton(renderer));
+const vrButton = VRButton.createButton(renderer);
+document.body.appendChild(vrButton);
+// No VR headset (like on a PC): hide the button instead of showing "VR NOT SUPPORTED"
+if (!navigator.xr) vrButton.style.display = 'none';
+else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) vrButton.style.display = 'none'; }).catch(() => { vrButton.style.display = 'none'; });
 // Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
 const inQuestApp = window.getDigitalGoodsService !== undefined;
 if (inQuestApp && navigator.xr) {
@@ -506,11 +510,13 @@ function foeStrikeLands() {
   if (d > 2.4 * foe.cfg.size) { whoosh(); return; }   // missed: you dodged out of range
   let blocked = false, parried = false;
   if (renderer.xr.isPresenting) {
-    // VR: blocked if your blade is in the way of their sword tip
+    // VR: blocked if your blade or your shield is in the way of their sword
     const theirTip = knight.userData.sword.userData.tip.getWorldPosition(new THREE.Vector3());
-    const dist = distToSegment(theirTip, vrBladeBase, vrBladeTip);
-    blocked = dist < 0.4;
-    parried = blocked && vrBladeSpeed > 1.5;
+    const swordBlock = distToSegment(theirTip, vrBladeBase, vrBladeTip) < 0.4;
+    const shieldBlock = shieldBlocks(theirTip);
+    blocked = swordBlock || shieldBlock;
+    parried = (swordBlock && vrBladeSpeed > 1.5) || (shieldBlock && vrShieldSpeed > 1.5);   // a quick swing or shield shove
+    if (shieldBlock) leftHand.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.9, 120);
   } else if (player.blocking && facingFoeDot() > 0.35) {
     blocked = true;
     parried = (performance.now() / 1000 - player.blockStart) < PARRY_WINDOW;
@@ -779,9 +785,52 @@ vrSword.rotation.x = -Math.PI / 2 + 0.6;   // blade points forward and a little 
 vrSword.visible = false;
 const vrBladeBase = new THREE.Vector3(), vrBladeTip = new THREE.Vector3(), lastTip = new THREE.Vector3();
 let vrBladeSpeed = 0;
+
+// ---------- VR: a shield on your left arm ----------
+// Hold it up between you and the knight's sword to block. Shove it at them just as they hit to PARRY!
+let leftHand = null;
+const vrShield = new THREE.Group();
+{
+  const wood = new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.8 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0xb8bcc8, roughness: 0.35, metalness: 0.8 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0x2a4aa0, roughness: 0.6 });
+  // Heater-shield shape: flat top, pointed bottom
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.24, 0.3); shape.lineTo(0.24, 0.3); shape.lineTo(0.24, 0.02);
+  shape.quadraticCurveTo(0.22, -0.22, 0, -0.34); shape.quadraticCurveTo(-0.22, -0.22, -0.24, 0.02); shape.closePath();
+  const face = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelSize: 0.015, bevelThickness: 0.01, bevelSegments: 2 }), wood);
+  face.position.z = -0.02; vrShield.add(face);
+  const rim = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.012, bevelEnabled: false }), steel);
+  rim.scale.set(1.06, 1.06, 1); rim.position.z = -0.012; vrShield.add(rim);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.58, 0.012), blue); stripe.position.set(0, -0.01, -0.035); vrShield.add(stripe);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.08, 0.012), blue); bar.position.set(0, 0.12, -0.036); vrShield.add(bar);
+  const boss = new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), steel);
+  boss.rotation.x = -Math.PI / 2; boss.position.set(0, 0.12, -0.04); vrShield.add(boss);
+}
+vrShield.position.set(0.02, 0.06, -0.08);   // strapped to your forearm, face pointing forward
+vrShield.visible = false;
+const shieldCenter = new THREE.Vector3(), lastShield = new THREE.Vector3();
+let vrShieldSpeed = 0;
+// Is the shield between your head and the knight's sword?
+function shieldBlocks(theirTip) {
+  if (!leftHand) return false;
+  vrShield.getWorldPosition(shieldCenter);
+  if (theirTip.distanceTo(shieldCenter) < 0.45) return true;
+  const head = camera.getWorldPosition(new THREE.Vector3());
+  const toFoe = foeChest().sub(head); toFoe.y *= 0.5; toFoe.normalize();
+  const rel = shieldCenter.clone().sub(head);
+  const along = rel.dot(toFoe);                                  // how far out in front of you
+  const sideways = rel.addScaledVector(toFoe, -along).length();  // how far off the line to the knight
+  return along > 0.1 && along < 0.9 && sideways < 0.38;
+}
+
 for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
-  c.addEventListener('connected', e => { c.userData.input = e.data; if (e.data.handedness === 'right') { rightHand = c; c.add(vrSword); } });
+  c.addEventListener('connected', e => {
+    c.userData.input = e.data;
+    if (e.data.handedness === 'right') { rightHand = c; c.add(vrSword); }
+    if (e.data.handedness === 'left') { leftHand = c; c.add(vrShield); vrShield.visible = renderer.xr.isPresenting; }
+  });
   c.addEventListener('disconnected', () => { c.userData.input = null; });
   c.addEventListener('selectstart', () => {
     if (state === 'champion' && stateT > 1.5) { fightT = 0; startRound(0); }
@@ -792,13 +841,13 @@ for (let i = 0; i < 2; i++) {
 }
 renderer.xr.addEventListener('sessionstart', () => {
   for (const id of ['round', 'foe', 'you', 'cross']) $(id).hidden = true;
-  pcSword.visible = false; vrSword.visible = true;
+  pcSword.visible = false; vrSword.visible = true; vrShield.visible = true;
   if (state === 'intro') startGame();
   const s = renderer.xr.getSession();
   s.addEventListener('visibilitychange', () => { if (s.visibilityState !== 'visible') setPaused(true); });
 });
 renderer.xr.addEventListener('sessionend', () => {
-  pcSword.visible = true; vrSword.visible = false;
+  pcSword.visible = true; vrSword.visible = false; vrShield.visible = false;
   for (const id of ['round', 'foe', 'you', 'cross']) $(id).hidden = state === 'intro';
   if (state !== 'intro') setPaused(true);
 });
@@ -830,6 +879,11 @@ function vrSwordCheck(dt) {
   vrSword.userData.tip.getWorldPosition(vrBladeTip);
   vrBladeSpeed = lastTip.lengthSq() ? vrBladeTip.distanceTo(lastTip) / Math.max(dt, 1e-3) : 0;
   lastTip.copy(vrBladeTip);
+  if (leftHand) {
+    vrShield.getWorldPosition(shieldCenter);
+    vrShieldSpeed = lastShield.lengthSq() ? shieldCenter.distanceTo(lastShield) / Math.max(dt, 1e-3) : 0;
+    lastShield.copy(shieldCenter);
+  }
   if (!foe || state !== 'fighting' || foe.hitCool > 0) return;
   const c = foeChest();
   const r = 0.5 * foe.cfg.size;
