@@ -82,7 +82,18 @@ document.body.appendChild(vrButton);
 if (!navigator.xr) vrButton.style.display = 'none';
 else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) vrButton.style.display = 'none'; }).catch(() => { vrButton.style.display = 'none'; });
 // Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
-const inQuestApp = window.getDigitalGoodsService !== undefined;
+// The Quest sticks can drift a little on their own, so small pushes are ignored (a "dead zone").
+// You only move once the stick is really pushed. Raise this number if you still drift, lower it if steering feels sluggish.
+const STICK_DEAD_ZONE = 0.35;
+function stickDeadZone(axes) {
+  const out = Array.from(axes);
+  for (const i of [0, 2]) {
+    const x = out[i] || 0, y = out[i + 1] || 0, len = Math.hypot(x, y);
+    const k = len < STICK_DEAD_ZONE ? 0 : (len - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE) / len;
+    out[i] = x * k; out[i + 1] = y * k;
+  }
+  return out;
+}const inQuestApp = window.getDigitalGoodsService !== undefined;
 if (inQuestApp && navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     if (!ok || renderer.xr.isPresenting) return;
@@ -740,7 +751,7 @@ function updateWalk(dt, inVR) {
   let fx = 0, sx = 0, jump = false;
   if (inVR) {
     for (const c of controllers) {
-      const src = c.userData.input, ax = src?.gamepad?.axes;
+      const src = c.userData.input, ax = src?.gamepad && stickDeadZone(src.gamepad.axes);
       if (!ax || ax.length < 4) continue;
       if (src.handedness === 'left') { sx = ax[2]; fx = -ax[3]; }
       if (src.handedness === 'right') {
