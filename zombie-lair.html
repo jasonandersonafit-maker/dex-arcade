@@ -50,7 +50,7 @@
   <p>Stop the zombies before they reach you. Headshots kill in one hit. You have 5 lives. Each level, the zombies get faster, dodge more and start jumping. Every 5th level is a boss fight, and you unlock better guns as you go. <b>Don't shoot the people</b> yelling "HELP!" or you lose a heart.</p>
   <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). You stand your ground (no sliding). Press <b>B</b> for a missile. There's an <b>RPG on your back</b>: reach over your shoulder and squeeze the <b>grip</b> to grab it, pull the trigger to fire, let go of the grip to put it back.</p>
   <p><b>On PC:</b> <b>left click</b> to shoot where the mouse points (hold for rapid fire). <b>A / D</b> or the <b>arrow keys</b> slide you. <b>Right click</b> (or <b>B</b>) fires a missile at the mouse pointer.</p>
-  <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>X</b> button on Quest.</p>
+  <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>Y</b> button on Quest.</p>
 </div>
 <button id="pauseBtn" type="button">❚❚ Pause</button>
 <div id="godBadge" hidden>★ INVINCIBLE</div>
@@ -110,20 +110,20 @@ document.body.appendChild(vrButton);
 if (!navigator.xr) vrButton.style.display = 'none';
 else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) vrButton.style.display = 'none'; }).catch(() => { vrButton.style.display = 'none'; });
 // Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
-// Quest pause buttons, read straight from the headset: X pauses / resumes, Y while paused goes back to the arcade
-let vrXWasDown = false;
+// Quest pause buttons, read straight from the headset: Y pauses / resumes, B while paused goes back to the arcade
+let vrYWasDown = false;
 function vrPauseButtons() {
   const session = renderer.xr.getSession();
   if (!session) return;
-  let x = false, y = false;
+  let y = false, b = false;
   for (const src of session.inputSources) {
-    if (src.handedness !== 'left' || !src.gamepad) continue;
-    x = !!src.gamepad.buttons[4]?.pressed;
-    y = !!src.gamepad.buttons[5]?.pressed;
+    if (!src.gamepad) continue;
+    if (src.handedness === 'left') y = !!src.gamepad.buttons[5]?.pressed;
+    if (src.handedness === 'right') b = !!src.gamepad.buttons[5]?.pressed;
   }
-  if (x && !vrXWasDown) setPaused(!paused);
-  vrXWasDown = x;
-  if (paused && y) goToArcade();
+  if (y && !vrYWasDown) setPaused(!paused);
+  vrYWasDown = y;
+  if (paused && b) goToArcade();
 }const inQuestApp = window.getDigitalGoodsService !== undefined;
 if (inQuestApp && navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
@@ -1364,7 +1364,7 @@ pauseCanvas.width = 512; pauseCanvas.height = 192;
   g.strokeStyle = '#7dff6b'; g.lineWidth = 6; g.strokeRect(3, 3, 506, 186);
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillStyle = '#7dff6b'; g.font = 'bold 72px system-ui, sans-serif'; g.fillText('PAUSED', 256, 80);
-  g.fillStyle = '#e8ecff'; g.font = '28px system-ui, sans-serif'; g.fillText('X: resume  ·  Y: back to arcade', 256, 150);
+  g.fillStyle = '#e8ecff'; g.font = '28px system-ui, sans-serif'; g.fillText('Y: resume  ·  B: back to arcade', 256, 150);
 }
 const pauseSign = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.3),
   new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(pauseCanvas), transparent: true, depthTest: false }));
@@ -1922,7 +1922,6 @@ renderer.setAnimationLoop(() => {
     if (!pad || c.userData.input.handedness !== 'left') continue;
     const pressed = !!pad.buttons[4]?.pressed;
     // Y button while paused: back to the arcade
-    if (paused && pad.buttons[5]?.pressed) goToArcade();
   }
   pauseSign.visible = paused && renderer.xr.isPresenting;
   if (paused) {   // everything freezes while paused
