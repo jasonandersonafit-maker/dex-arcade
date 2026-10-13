@@ -86,8 +86,8 @@
     <h1>SANDBOX RANGE</h1>
     <p>Grab any of 15 weapons from the Armory tables and blast everything on the range: targets, bottles, exploding barrels, zombie dummies and a giant training dummy. Shoot the big red button to launch clay pigeons, and hop in the TANK parked by the Armory!</p>
     <div class="controls">
-      <div><b>PC</b>Mouse: look · Click: shoot<br>Hold E or right click: missiles!<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9, 0 / wheel: switch weapon<br>E at the tank: drive it!<br>T: reset targets · P: pause</div>
-      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot<br>Grip = E: pick up a weapon,<br>get in / out of the tank<br>Reach over your shoulder + grip:<br>grab the RPG, trigger fires it!<br>Hold left trigger: missiles<br>A: jump · B: next weapon<br>X: pause</div>
+      <div><b>PC</b>Mouse: look · Click: shoot<br>Rockets: pick up the Rocket Launcher<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9, 0 / wheel: switch weapon<br>E at the tank: drive it!<br>T: reset targets · P: pause</div>
+      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot<br>Grip = E: pick up a weapon,<br>get in / out of the tank<br>Reach over your shoulder + grip:<br>grab the RPG, trigger fires rockets!<br>A: jump · B: next weapon<br>X: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
     <a class="back" href="index.html">← Back to Arcade</a>
@@ -845,7 +845,7 @@ function pickUp(p) {
   const first = !owned.some(Boolean);
   if (!owned[p.index]) { owned[p.index] = true; tone(880, 0.1, 'triangle', 0.1, 1320); tone(1320, 0.15, 'triangle', 0.08, 1320, 0.08); }
   equip(p.index);
-  if (first) $('tipLine').textContent = 'SHOOT EVERYTHING! · HOLD E OR RIGHT CLICK: MISSILES · T: RESET';
+  if (first) $('tipLine').textContent = 'SHOOT EVERYTHING! · GRAB THE ROCKET LAUNCHER FOR ROCKETS · T: RESET';
 }
 
 // Hotbar (Minecraft style): shows the guns you've picked up, in order. Keys 1-9 and 0 pick them.
@@ -1158,10 +1158,11 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (renderer.xr.isPresenting || state !== 'play' || paused) return;
   if (!locked && !freeLook) { lockMouse(); return; }
   if (e.button === 0) firing = true;
-  // Right click: aim down the scope with the sniper, otherwise full-auto missiles
+  // Right click: aim down the scope with the sniper; in the tank, its missiles.
+  // On foot, rockets only come from the Rocket Launcher.
   if (e.button === 2) {
     if (current >= 0 && WEAPONS[current].zoom && !tank.inside) zoomed = true;
-    else rightMissiles = true;
+    else if (tank.inside) rightMissiles = true;
   }
 });
 addEventListener('mouseup', e => {
@@ -1186,12 +1187,11 @@ addEventListener('keydown', e => {
   if (paused) return;
   const num = parseInt(e.key);
   if (num >= 0 && num <= 9 && !inTank()) { const list = ownedList(); const slot = num === 0 ? 9 : num - 1; if (list[slot] !== undefined) equip(list[slot]); }
-  // E: pick up the weapon you're standing next to, otherwise hold it for full-auto missiles
+  // E: pick up the weapon you're standing next to, or get in / out of the tank
   if (e.code === 'KeyE' && !e.repeat) {
     if (tank.inside) exitTank();                // E in the tank: climb out
     else if (nearPickup) pickUp(nearPickup);
     else if (nearTank()) enterTank();           // E next to the tank: climb in
-    else missileHeld = true;
   }
   if (e.code === 'KeyT' && !e.repeat) resetTargets();
   if (e.code === 'KeyZ' && !e.repeat && current >= 0 && WEAPONS[current].zoom) { zoomed = !zoomed; zoomToggled = zoomed; }   // sniper scope on/off
@@ -1280,7 +1280,7 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('disconnected', () => { c.userData.input = null; });
   c.addEventListener('selectstart', () => {
     if (c === rpgHand) { if (state === 'play' && !paused) c.userData.rpgFiring = true; return; }   // holding the RPG: fire missiles
-    if (c.userData.input?.handedness === 'left') { if (state === 'play' && !paused) missileHeld = true; return; }   // left trigger: missiles
+    if (c.userData.input?.handedness === 'left') return;   // rockets only come from the RPG on your back
     if (c !== rightHand || state !== 'play' || paused) return;
     if (vrPointedPickup) { pickUp(vrPointedPickup); return; }   // point at a weapon and pull the trigger to grab it
     firing = true;
