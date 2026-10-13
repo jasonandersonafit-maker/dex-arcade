@@ -87,7 +87,7 @@
     <p>Grab any of 15 weapons from the Armory tables and blast everything on the range: targets, bottles, exploding barrels, zombie dummies and a giant training dummy. Shoot the big red button to launch clay pigeons, and hop in the TANK parked by the Armory!</p>
     <div class="controls">
       <div><b>PC</b>Mouse: look · Click: shoot<br>Hold E or right click: missiles!<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9, 0 / wheel: switch weapon<br>E at the tank: drive it!<br>T: reset targets · P: pause</div>
-      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot / pick up<br>(point at a weapon to grab it)<br>Hold left trigger: missiles!<br>A: jump · B: next weapon<br>Left grip at the tank: drive it!<br>X: pause</div>
+      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot<br>Grip = E: pick up a weapon,<br>get in / out of the tank<br>Reach over your shoulder + grip:<br>grab the RPG, trigger fires it!<br>Hold left trigger: missiles<br>A: jump · B: next weapon<br>X: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
     <a class="back" href="index.html">← Back to Arcade</a>
@@ -155,6 +155,16 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+// Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
+const inQuestApp = window.getDigitalGoodsService !== undefined;
+if (inQuestApp && navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (!ok || renderer.xr.isPresenting) return;
+    navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] })
+      .then(s => { if (!renderer.xr.isPresenting) renderer.xr.setSession(s); else s.end(); })
+      .catch(() => {});
+  });
+}
 
 const scene = new THREE.Scene();
 const SKY = new THREE.Color(0xbfe0ff);
@@ -970,8 +980,8 @@ function launchMissile() {
   noise(0.25, 'bandpass', 800, 0.15);
 }
 
-function fireProjectile(w, fromOverride = null, light = false, big = false) {
-  const { origin, dir } = aimRay();
+function fireProjectile(w, fromOverride = null, light = false, big = false, rayOverride = null) {
+  const { origin, dir } = rayOverride || aimRay();
   const from = fromOverride || muzzlePos();
   const isRocket = w.kind === 'rocket';
   const mesh = new THREE.Group();
@@ -1200,6 +1210,7 @@ function resetTargets() {
 function setPaused(p) {
   paused = p;
   firing = false; zoomed = false; missileHeld = false; rightMissiles = false;
+  if (rpgHand) rpgHand.userData.rpgFiring = false;
   laserSound(false); spinSound(0);
   if (p) engineSound(false);   // the tank engine starts again when you resume
   $('pauseMenu').hidden = !p || renderer.xr.isPresenting;
@@ -1234,7 +1245,7 @@ function cantSwitchPagesNotice() {
 }
 function goToArcade() {
   const go = () => { location.href = 'index.html'; setTimeout(cantSwitchPagesNotice, 700); };
-  if (renderer.xr.isPresenting) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  if (renderer.xr.isPresenting && !inQuestApp) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
   else go();
 }
 $('arcadeBtn').addEventListener('click', goToArcade);
@@ -1264,12 +1275,15 @@ for (let i = 0; i < 2; i++) {
   });
   c.addEventListener('disconnected', () => { c.userData.input = null; });
   c.addEventListener('selectstart', () => {
+    if (c === rpgHand) { if (state === 'play' && !paused) c.userData.rpgFiring = true; return; }   // holding the RPG: fire missiles
     if (c.userData.input?.handedness === 'left') { if (state === 'play' && !paused) missileHeld = true; return; }   // left trigger: missiles
     if (c !== rightHand || state !== 'play' || paused) return;
     if (vrPointedPickup) { pickUp(vrPointedPickup); return; }   // point at a weapon and pull the trigger to grab it
     firing = true;
   });
-  c.addEventListener('selectend', () => { if (c === rightHand) firing = false; if (c.userData.input?.handedness === 'left') missileHeld = false; });
+  c.addEventListener('selectend', () => { c.userData.rpgFiring = false; if (c === rightHand) firing = false; if (c.userData.input?.handedness === 'left') missileHeld = false; });
+  c.addEventListener('squeezestart', () => gripPressed(c));
+  c.addEventListener('squeezeend', () => { if (c === rpgHand) stowRPG(); });   // let go of the grip: the RPG goes back on your back
   const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0xff4040, transparent: true, opacity: 0.4 }));
   laser.scale.z = 8;
   c.add(laser);
@@ -1277,6 +1291,79 @@ for (let i = 0; i < 2; i++) {
   controllers.push(c);
 }
 let vrPointedPickup = null;
+
+// ---------- VR: an RPG on your back ----------
+// Reach over your shoulder and squeeze the grip to grab it, pull the trigger to fire missiles,
+// let go of the grip to put it back.
+const rpg = new THREE.Group();
+{
+  const green = new THREE.MeshStandardMaterial({ color: 0x4a5a32, roughness: 0.7, metalness: 0.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 0.6, metalness: 0.5 });
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.95, 12), green);
+  tube.rotation.x = Math.PI / 2; tube.position.z = -0.05; rpg.add(tube);
+  const bulb = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.075, 0.14, 12), green);   // the rocket poking out the front
+  bulb.rotation.x = Math.PI / 2; bulb.position.z = -0.58; rpg.add(bulb);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 12), green);
+  nose.rotation.x = -Math.PI / 2; nose.position.z = -0.75; rpg.add(nose);
+  const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.05, 0.14, 12, 1, true), dark);
+  bell.material.side = THREE.DoubleSide;
+  bell.rotation.x = Math.PI / 2; bell.position.z = 0.48; rpg.add(bell);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.11, 0.04), dark); grip.position.set(0, -0.08, 0.02); rpg.add(grip);
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.05), dark); sight.position.set(-0.055, 0.05, -0.2); rpg.add(sight);
+  rpg.userData.muzzle = new THREE.Object3D(); rpg.userData.muzzle.position.z = -0.9; rpg.add(rpg.userData.muzzle);
+}
+const rpgBack = new THREE.Group();   // follows your head so the RPG sits across your back
+rig.add(rpgBack);
+const rpgBackQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0.45, 0.89, 0).normalize());
+rpg.quaternion.copy(rpgBackQuat);
+rpgBack.add(rpg);
+let rpgHand = null;   // the controller holding the RPG (null = it's on your back)
+const headEuler = new THREE.Euler(0, 0, 0, 'YXZ'), backDir = new THREE.Vector3();
+function updateRPG(inVR) {
+  rpgBack.visible = inVR && !tank.inside;
+  headEuler.setFromQuaternion(camera.quaternion);
+  backDir.set(Math.sin(headEuler.y), 0, Math.cos(headEuler.y));
+  rpgBack.position.copy(camera.position).addScaledVector(backDir, 0.17);
+  rpgBack.position.y -= 0.32;
+  rpgBack.rotation.set(0, headEuler.y, 0);
+}
+// Is this hand reaching behind your head / over your shoulder?
+function nearBack(c) {
+  const d = c.position.clone().sub(camera.position);
+  return d.y > -0.5 && d.y < 0.35 && d.dot(backDir) > -0.02 && Math.hypot(d.x, d.z) < 0.5;
+}
+function grabRPG(c) {
+  rpgHand = c; c.add(rpg);
+  rpg.position.set(0, 0.05, 0.12); rpg.quaternion.identity();
+  if (c === rightHand) firing = false;
+  c.userData.rpgFiring = false;
+  c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.6, 80);
+  tone(220, 0.12, 'square', 0.06, 330);
+}
+function stowRPG() {
+  if (!rpgHand) return;
+  rpgHand.userData.rpgFiring = false;
+  rpgHand = null; rpgBack.add(rpg);
+  rpg.position.set(0, 0, 0); rpg.quaternion.copy(rpgBackQuat);
+  tone(330, 0.1, 'square', 0.05, 200);
+}
+function fireRPG() {
+  rpgHand.getWorldPosition(tmpPos); rpgHand.getWorldQuaternion(tmpQuat);
+  const ray = { origin: tmpPos.clone(), dir: new THREE.Vector3(0, 0, -1).applyQuaternion(tmpQuat) };
+  fireProjectile(WEAPONS[5], rpg.userData.muzzle.getWorldPosition(new THREE.Vector3()), true, false, ray);
+  noise(0.25, 'bandpass', 800, 0.15);
+  rpgHand.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.7, 50);
+}
+// Grip button = the E key: get out of the tank, grab the RPG off your back, pick up a weapon, or climb into the tank
+function gripPressed(c) {
+  if (state !== 'play' || paused) return;
+  if (tank.inside) { exitTank(); return; }
+  if (!rpgHand && nearBack(c)) { grabRPG(c); return; }
+  const p = vrPointedPickup || nearPickup;
+  if (p) { pickUp(p); return; }
+  if (nearTank()) enterTank();
+}
+
 renderer.xr.addEventListener('sessionstart', () => {
   for (const id of ['hud', 'cross', 'hotbar', 'weaponName', 'scope']) $(id).hidden = true;
   if (state === 'intro') startGame();
@@ -1284,6 +1371,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   s.addEventListener('visibilitychange', () => { if (s.visibilityState !== 'visible') setPaused(true); });
 });
 renderer.xr.addEventListener('sessionend', () => {
+  stowRPG();
   heldGuns.forEach(g => pcHand.add(g)); handParent = pcHand;
   for (const id of ['hud', 'cross', 'hotbar', 'weaponName']) $(id).hidden = false;
   if (state === 'play') setPaused(true);
@@ -1300,10 +1388,6 @@ function readVR() {
       if (x && !c.userData.xWas) setPaused(!paused);
       c.userData.xWas = x;
       if (paused && pad.buttons[5]?.pressed) goToArcade();
-      // Left grip: climb into / out of the tank
-      const grip = !!pad.buttons[1]?.pressed;
-      if (grip && !c.userData.gripWas && state === 'play' && !paused) { if (tank.inside) exitTank(); else if (nearTank()) enterTank(); }
-      c.userData.gripWas = grip;
     }
     if (src.handedness === 'right' && ax.length >= 4) {
       if (pad.buttons[4]?.pressed) out.jump = true;
@@ -1374,6 +1458,7 @@ function engineSound(on, speed = 0) {
   if (engine) engine.o.frequency.value = 38 + Math.abs(speed) * 7;
 }
 function enterTank() {
+  stowRPG();
   tank.inside = true;
   firing = false; zoomed = false; burstLeft = 0; laserSound(false); spinSound(0);
   heldGuns.forEach(g => { g.visible = false; });
@@ -1502,6 +1587,9 @@ renderer.setAnimationLoop(() => {
   for (const p of pickups) { p.gun.rotation.y = Math.PI / 2 + Math.sin(t + p.index) * 0.4; p.gun.position.y = TABLE_Y + 0.35 + Math.sin(t * 2 + p.index) * 0.04; p.glow.position.y = p.gun.position.y; }
 
   const vr = inVR ? readVR() : null;
+  updateRPG(inVR);
+  // While the RPG is in your right hand, your gun is put away
+  if (rightHand && current >= 0 && !tank.inside) heldGuns[current].visible = rpgHand !== rightHand;
 
   if (state === 'intro') {
     player.yaw = Math.sin(t * 0.15) * 0.5; player.pitch = -0.05;
@@ -1575,7 +1663,8 @@ renderer.setAnimationLoop(() => {
         const d = to.normalize().dot(dir);
         if (d > best) { best = d; vrPointedPickup = p; }
       }
-    } else {
+    }
+    {   // the weapon you're standing next to (E on PC, grip button in VR)
       let best = 2.4;
       for (const p of pickups) {
         const d = Math.hypot(p.gun.position.x - player.pos.x, p.gun.position.z - player.pos.z);
@@ -1592,6 +1681,7 @@ renderer.setAnimationLoop(() => {
     }
     missileCooldown -= dt;
     if ((missileHeld || rightMissiles) && missileCooldown <= 0) { launchMissile(); missileCooldown = MISSILE_DELAY; }
+    if (rpgHand?.userData.rpgFiring && missileCooldown <= 0) { fireRPG(); missileCooldown = MISSILE_DELAY; }
     updateProjectiles(dt);
   } else { updateLaser(dt, false); }
   updateFlames(dt);
