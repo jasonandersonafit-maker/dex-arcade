@@ -48,7 +48,7 @@
 <div id="hud">
   <h1>ZOMBIE LAIR</h1>
   <p>Stop the zombies before they reach you. Headshots kill in one hit. You have 5 lives. Each level, the zombies get faster, dodge more and start jumping. Every 5th level is a boss fight, and you unlock better guns as you go. <b>Don't shoot the people</b> yelling "HELP!" or you lose a heart.</p>
-  <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). Push a <b>thumbstick</b> left or right to slide. Press <b>B</b> for a missile.</p>
+  <p><b>On Quest:</b> press <b>Enter VR</b> at the bottom. Pull a <b>trigger</b> to shoot (hold for rapid fire). <b>Left stick</b> walks around the yard, <b>right stick</b> turns. Press <b>B</b> for a missile. There's an <b>RPG on your back</b>: reach over your shoulder and squeeze the <b>grip</b> to grab it, pull the trigger to fire, let go of the grip to put it back.</p>
   <p><b>On PC:</b> <b>left click</b> to shoot where the mouse points (hold for rapid fire). <b>A / D</b> or the <b>arrow keys</b> slide you. <b>Right click</b> (or <b>B</b>) fires a missile at the mouse pointer.</p>
   <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>X</b> button on Quest.</p>
 </div>
@@ -1013,12 +1013,12 @@ function destroyShot(s, burst = true) {
   if (burst) explode(s.position, s.userData.boulder ? 0x6f6890 : 0xb8ff5a, s.userData.boulder ? 18 : 10, 3, s.userData.boulder ? 0.09 : 0.05);
 }
 function updateEnemyShots(dt) {
-  camera.getWorldPosition(tmpPos);
+  const head = camera.getWorldPosition(new THREE.Vector3());
   for (const s of [...enemyShots]) {
     s.position.addScaledVector(s.userData.vel, dt);
     if (s.userData.spin) { s.rotation.x += s.userData.spin.x * dt; s.rotation.y += s.userData.spin.y * dt; }
-    if (s.position.distanceTo(tmpPos) < 0.45) { destroyShot(s, false); playerHit(1); }   // no debris in your face
-    else if (s.position.z > 2 || s.position.y < 0) destroyShot(s);
+    if (s.position.distanceTo(head) < 0.45) { destroyShot(s, false); playerHit(1); }   // no debris in your face
+    else if (s.position.z > head.z + 2 || s.position.y < 0) destroyShot(s);
   }
 }
 function clearEnemyShots() { for (const s of [...enemyShots]) destroyShot(s); }
@@ -1187,7 +1187,7 @@ function updateVictory(dt) {
     const t = victoryT - u.riseDelay;
     if (t < 0) continue;
     if (z.position.y < 0) { z.position.y = Math.min(0, z.position.y + dt * 2); continue; }   // climbing out
-    z.rotation.y = Math.atan2(rig.position.x - z.position.x, -z.position.z);
+    z.rotation.y = Math.atan2(rig.position.x - z.position.x, rig.position.z - z.position.z);
     const burnT = victoryT - u.burnAt;
     if (burnT < 0) {
       // Shuffle in place, confused
@@ -1320,6 +1320,7 @@ function restart() {
   level = 1; levelKills = 0; levelBreak = 0; bossSpawned = false;
   kingBoss = null; kingWave = 0; waveQueue = 0;
   setWeapon(WEAPONS[0]);
+  rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);   // back to the start, facing the gate
   showBanner('LEVEL 1', 'stop ' + levelGoal(1) + ' zombies');
   drawBoard();
 }
@@ -1612,6 +1613,9 @@ for (let i = 0; i < 2; i++) {
   // Holding the trigger keeps firing; the game loop does the repeat shots
   controller.addEventListener('selectstart', () => { controller.userData.firing = true; controller.userData.cooldown = 0; });
   controller.addEventListener('selectend', () => { controller.userData.firing = false; });
+  // Grip: reach over your shoulder to grab the RPG; let go to put it back
+  controller.addEventListener('squeezestart', () => { if (!rpgHand && !paused && !gameOver && nearBack(controller)) grabRPG(controller); });
+  controller.addEventListener('squeezeend', () => { if (controller === rpgHand) stowRPG(); });
   const gun = makeGun();
   controller.add(gun);
   controller.userData.gun = gun;
@@ -1629,6 +1633,71 @@ function fireController(c) {
   c.getWorldQuaternion(tmpQuat);
   fireGun(c.userData.gun, tmpPos.clone(), new THREE.Vector3(0, 0, -1).applyQuaternion(tmpQuat));
   c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.5, 40);
+}
+
+// ---------- VR: an RPG on your back ----------
+// Reach over your shoulder and squeeze the grip to grab it, pull the trigger to fire missiles,
+// let go of the grip to put it back.
+const rpg = new THREE.Group();
+{
+  const green = new THREE.MeshStandardMaterial({ color: 0x4a5a32, roughness: 0.7, metalness: 0.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, roughness: 0.6, metalness: 0.5, side: THREE.DoubleSide });
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.95, 12), green);
+  tube.rotation.x = Math.PI / 2; tube.position.z = -0.05; rpg.add(tube);
+  const bulb = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.075, 0.14, 12), green);   // the rocket poking out the front
+  bulb.rotation.x = Math.PI / 2; bulb.position.z = -0.58; rpg.add(bulb);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.2, 12), green);
+  nose.rotation.x = -Math.PI / 2; nose.position.z = -0.75; rpg.add(nose);
+  const bell = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.05, 0.14, 12, 1, true), dark);
+  bell.rotation.x = Math.PI / 2; bell.position.z = 0.48; rpg.add(bell);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.11, 0.04), dark); grip.position.set(0, -0.08, 0.02); rpg.add(grip);
+  const sight = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.05), dark); sight.position.set(-0.055, 0.05, -0.2); rpg.add(sight);
+  rpg.userData.muzzle = new THREE.Object3D(); rpg.userData.muzzle.position.z = -0.9; rpg.add(rpg.userData.muzzle);
+}
+const rpgBack = new THREE.Group();   // follows your head so the RPG sits across your back
+rig.add(rpgBack);
+const rpgBackQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0.45, 0.89, 0).normalize());
+rpg.quaternion.copy(rpgBackQuat);
+rpgBack.add(rpg);
+let rpgHand = null;   // the controller holding the RPG (null = it's on your back)
+const headEuler = new THREE.Euler(0, 0, 0, 'YXZ'), backDir = new THREE.Vector3();
+function updateRPG() {
+  rpgBack.visible = renderer.xr.isPresenting;
+  headEuler.setFromQuaternion(camera.quaternion);
+  backDir.set(Math.sin(headEuler.y), 0, Math.cos(headEuler.y));
+  rpgBack.position.copy(camera.position).addScaledVector(backDir, 0.17);
+  rpgBack.position.y -= 0.32;
+  rpgBack.rotation.set(0, headEuler.y, 0);
+  for (const c of controllers) c.userData.gun.visible = c !== rpgHand;   // your gun is put away while that hand holds the RPG
+}
+// Is this hand reaching behind your head / over your shoulder?
+function nearBack(c) {
+  const d = c.position.clone().sub(camera.position);
+  return d.y > -0.5 && d.y < 0.35 && d.dot(backDir) > -0.02 && Math.hypot(d.x, d.z) < 0.5;
+}
+function grabRPG(c) {
+  rpgHand = c; c.add(rpg);
+  rpg.position.set(0, 0.05, 0.12); rpg.quaternion.identity();
+  c.userData.firing = false;
+  c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.6, 80);
+  beep(330, 0.12, 'square', 0.06);
+}
+function stowRPG() {
+  if (!rpgHand) return;
+  rpgHand.userData.firing = false;
+  rpgHand = null; rpgBack.add(rpg);
+  rpg.position.set(0, 0, 0); rpg.quaternion.copy(rpgBackQuat);
+  beep(200, 0.1, 'square', 0.05);
+}
+function fireRPG(c) {
+  rpg.userData.muzzle.getWorldPosition(tmpPos);
+  c.getWorldQuaternion(tmpQuat);
+  // fireMissile starts the missile a bit lower and further forward, so undo that here
+  const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(tmpQuat);
+  const before = missileCooldown;
+  const from = tmpPos.clone().addScaledVector(dir, -0.4); from.y += 0.25;
+  fireMissile(from, dir);
+  if (missileCooldown > before) c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(0.8, 80);
 }
 
 // ---------- PC controls ----------
@@ -1667,14 +1736,43 @@ function fireMouseMissile() {
   fireMissile(tmpPos, raycaster.ray.direction);   // fireMissile waits out MISSILE_COOLDOWN between shots
 }
 
-// ---------- Movement: slide left and right along the rail ----------
+// ---------- Movement ----------
+// VR: walk anywhere in the yard with the left stick, snap turn with the right stick.
+// PC: slide left and right along the rail.
+const VR_WALK_SPEED = 3;
+const YARD = { minX: -RAIL, maxX: RAIL, minZ: -3, maxZ: 3 };   // where you can walk (the Imp waits at -3.8)
+let snapReady = true;
+const headPos = new THREE.Vector3(), walkDir = new THREE.Vector3(), walkSide = new THREE.Vector3();
+function rotateRigAroundHead(angle) {
+  camera.getWorldPosition(headPos);
+  rig.rotation.y += angle;
+  rig.updateMatrixWorld(true);
+  const after = camera.getWorldPosition(new THREE.Vector3());
+  rig.position.x += headPos.x - after.x;
+  rig.position.z += headPos.z - after.z;
+}
 function move(dt) {
   let mx = 0;
   if (renderer.xr.isPresenting) {
+    let fx = 0, sx = 0;
     for (const src of renderer.xr.getSession().inputSources) {
       const ax = src.gamepad?.axes; if (!ax || ax.length < 4) continue;
-      mx += ax[2];
+      if (src.handedness === 'left') { sx = ax[2]; fx = -ax[3]; }
+      if (src.handedness === 'right') {
+        if (Math.abs(ax[2]) > 0.7 && snapReady) { rotateRigAroundHead(-Math.sign(ax[2]) * Math.PI / 6); snapReady = false; }
+        if (Math.abs(ax[2]) < 0.3) snapReady = true;
+      }
     }
+    if (Math.hypot(fx, sx) < 0.15) return;
+    // Walk the way your head is facing
+    camera.getWorldDirection(walkDir); walkDir.y = 0; walkDir.normalize();
+    walkSide.set(-walkDir.z, 0, walkDir.x);
+    rig.position.addScaledVector(walkDir, fx * VR_WALK_SPEED * dt).addScaledVector(walkSide, sx * VR_WALK_SPEED * dt);
+    // Stay inside the yard (measured at your head, not the middle of your play space)
+    camera.getWorldPosition(headPos);
+    rig.position.x += THREE.MathUtils.clamp(headPos.x, YARD.minX, YARD.maxX) - headPos.x;
+    rig.position.z += THREE.MathUtils.clamp(headPos.z, YARD.minZ, YARD.maxZ) - headPos.z;
+    return;
   } else {
     if (keys.KeyD || keys.ArrowRight) mx += 1;
     if (keys.KeyA || keys.ArrowLeft) mx -= 1;
@@ -1691,7 +1789,9 @@ let spawnTimer = 0.5;
   if (start > 1) { level = start - 1; levelBreak = 0.01; }
   if (location.hash === '#win') { level = FINAL_LEVEL; setWeapon(weaponForLevel(level)); startVictory(); }   // watch the ending
 }
+const you = new THREE.Vector3();   // where your head is in the graveyard (you can walk around in VR)
 function updateZombies(dt) {
+  camera.getWorldPosition(you);
   // Rest between levels, then start the next one
   if (levelBreak > 0) {
     levelBreak -= dt;
@@ -1748,7 +1848,7 @@ function updateZombies(dt) {
     }
 
     // Shamble toward the player, drifting sideways to follow you
-    const dx = rig.position.x - z.position.x;
+    const dx = you.x - z.position.x;
     z.position.x += Math.sign(dx) * Math.min(Math.abs(dx), u.track * dt);
     // Weave side to side to dodge your shots (higher levels weave wider and quicker)
     u.weavePhase += dt * u.weaveFreq;
@@ -1802,7 +1902,7 @@ function updateZombies(dt) {
     if (Math.random() < dt * 0.05) groan();
 
     // Reached you: lose a life
-    if (z.position.z > -0.7) {
+    if (z.position.z > you.z - 0.7) {
       if (u.boss) {
         playerHit(u.damage);
         z.position.z = -8;   // knocked back to the gate to come at you again
@@ -1842,8 +1942,10 @@ renderer.setAnimationLoop(() => {
   move(dt);
 
   // Rapid fire while the trigger / mouse button is held
+  updateRPG();
   for (const c of controllers) {
     if (!c.userData.firing) continue;
+    if (c === rpgHand) { fireRPG(c); continue; }   // holding the RPG: the trigger fires missiles
     c.userData.cooldown -= dt;
     if (c.userData.cooldown <= 0) { fireController(c); c.userData.cooldown = weapon.delay; }
   }
