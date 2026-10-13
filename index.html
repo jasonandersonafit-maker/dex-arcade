@@ -76,6 +76,16 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
+// Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
+const inQuestApp = window.getDigitalGoodsService !== undefined;
+if (inQuestApp && navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (!ok || renderer.xr.isPresenting) return;
+    navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] })
+      .then(s => { if (!renderer.xr.isPresenting) renderer.xr.setSession(s); else s.end(); })
+      .catch(() => {});
+  });
+}
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x07040f);
@@ -597,7 +607,7 @@ function launch(cab) {
       setTimeout(() => n.remove(), 7000);
     }, 800);
   };
-  if (renderer.xr.isPresenting) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  if (renderer.xr.isPresenting && !inQuestApp) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
   else setTimeout(go, 650);
 }
 
