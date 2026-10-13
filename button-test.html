@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Button Test</title>
+<style>
+  html, body { margin:0; height:100%; background:#101828; color:#fff; font:16px system-ui, sans-serif; }
+  #info { position:fixed; left:16px; top:16px; white-space:pre; }
+</style>
+</head>
+<body>
+<div id="info">Press ENTER VR, then press buttons on your controllers.</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+
+// A test page: shows exactly which controller buttons the game can see, so we can fix the pause button.
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x101828);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100);
+scene.add(camera);
+
+const canvas = document.createElement('canvas'); canvas.width = 1024; canvas.height = 640;
+const tex = new THREE.CanvasTexture(canvas);
+const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.0), new THREE.MeshBasicMaterial({ map: tex }));
+panel.position.set(0, 1.5, -1.5);
+scene.add(panel);
+
+const controllers = [];
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.addEventListener('connected', e => { c.userData.input = e.data; console.log('[BTN] connected event, controller', i, e.data.handedness); });
+  c.addEventListener('disconnected', () => { c.userData.input = null; console.log('[BTN] disconnected', i); });
+  scene.add(c);
+  controllers.push(c);
+}
+renderer.xr.addEventListener('sessionstart', () => console.log('[BTN] session started'));
+
+let last = '', presses = 0;
+renderer.setAnimationLoop(() => {
+  const lines = [];
+  const s = renderer.xr.getSession();
+  lines.push('BUTTON TEST   (presses seen: ' + presses + ')');
+  lines.push('');
+  lines.push('Session inputs:');
+  if (s) for (const src of s.inputSources) {
+    const b = src.gamepad ? src.gamepad.buttons.map((x, n) => x.pressed ? n : null).filter(n => n !== null) : [];
+    lines.push(`  ${src.handedness}: ${src.gamepad ? 'gamepad ok' : 'NO gamepad'}  pressed: [${b.join(', ')}]`);
+  }
+  lines.push('');
+  lines.push('Game controllers (what the games use):');
+  controllers.forEach((c, i) => {
+    const src = c.userData.input;
+    const b = src?.gamepad ? src.gamepad.buttons.map((x, n) => x.pressed ? n : null).filter(n => n !== null) : [];
+    lines.push(`  #${i}: ${src ? src.handedness : 'NOT CONNECTED'}  pressed: [${b.join(', ')}]`);
+  });
+  const text = lines.join('\n');
+  if (text !== last) {
+    if (/pressed: \[\d/.test(text) && !/pressed: \[\d/.test(last)) presses++;
+    last = text;
+    console.log('[BTN] ' + text.replace(/\n/g, ' | '));
+    document.getElementById('info').textContent = text;
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#101828'; g.fillRect(0, 0, 1024, 640);
+    g.fillStyle = '#ffd23d'; g.font = '30px monospace';
+    lines.forEach((l, n) => { g.fillStyle = n === 0 ? '#ffd23d' : '#ffffff'; g.fillText(l, 30, 60 + n * 48); });
+    tex.needsUpdate = true;
+  }
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
