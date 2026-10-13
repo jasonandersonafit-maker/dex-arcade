@@ -66,6 +66,7 @@ const GAMES = [
   { title: 'HAUNTED MAZE', file: 'haunted-maze.html', color: '#b07dff', blurb: "DO NOT USE. You've been warned...", screen: 'maze', corner: true },
   { title: 'SANDBOX RANGE', file: 'sandbox-range.html', color: '#ff7a3d', blurb: '15 weapons and a tank!', screen: 'sandbox' },
   { title: 'SWORD ARENA', file: 'sword-arena.html', color: '#ff4d6d', blurb: 'Defeat 3 knights to be champion', screen: 'sword' },
+  { title: 'KART RACE', file: 'racing.html', color: '#3d8bff', blurb: 'Race 3 laps against 3 bots', screen: 'race' },
 ];
 const ARCADE_NAME = 'DEX ARCADE';
 
@@ -339,10 +340,10 @@ function drawScreen(cab, t) {
     g.imageSmoothingEnabled = false;
     // The game scenes are drawn 120 pixels tall; on the tall screen we add extra sky above them
     let h = fullH;
-    if (game.screen === 'zombies' || game.screen === 'chase' || game.screen === 'parkour' || game.screen === 'maze' || game.screen === 'sandbox' || game.screen === 'sword') {
+    if (game.screen === 'zombies' || game.screen === 'chase' || game.screen === 'parkour' || game.screen === 'maze' || game.screen === 'sandbox' || game.screen === 'sword' || game.screen === 'race') {
       h = 120;
       const extra = fullH - h;
-      g.fillStyle = { zombies: '#1a0840', chase: '#3a3aa0', parkour: '#3a7ae0', maze: '#000000', sandbox: '#3a8ae8', sword: '#3a2a6a' }[game.screen];
+      g.fillStyle = { zombies: '#1a0840', chase: '#3a3aa0', parkour: '#3a7ae0', maze: '#000000', sandbox: '#3a8ae8', sword: '#3a2a6a', race: '#2a6ad8' }[game.screen];
       g.fillRect(0, 0, w, extra + 1);
       g.fillStyle = '#fff6d0';
       for (let s = 0; s < 14; s++) g.fillRect((s * 37) % w, (s * 23) % extra, 1, 1);   // stars
@@ -369,6 +370,30 @@ function drawScreen(cab, t) {
       }
       g.fillStyle = '#7dff6b'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
       if (Math.floor(t * 2) % 2 === 0) g.fillText('PRESS START', w / 2, 110);
+    } else if (game.screen === 'race') {
+      // A road rushing toward you with karts weaving along it
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, '#2a6ad8'); grd.addColorStop(0.45, '#9ad0ff'); grd.addColorStop(0.46, '#4f9a32'); grd.addColorStop(1, '#5aa83a');
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      const hy = 54;   // horizon
+      g.fillStyle = '#4a4a50';
+      g.beginPath(); g.moveTo(w / 2 - 6, hy); g.lineTo(w / 2 + 6, hy); g.lineTo(w + 20, h); g.lineTo(-20, h); g.fill();
+      for (let k = 0; k < 6; k++) {   // curb stripes and middle dashes zooming past
+        const z = ((k / 6 + t * 0.9) % 1), y = hy + z * z * (h - hy), half = 6 + z * z * (w / 2 + 14);
+        g.fillStyle = k % 2 ? '#ffffff' : '#e8242a';
+        g.fillRect(w / 2 - half - 2, y, 4 + z * 4, 2 + z * 4); g.fillRect(w / 2 + half - 2, y, 4 + z * 4, 2 + z * 4);
+        g.fillStyle = '#f4f4f4'; g.fillRect(w / 2 - 1 - z, y, 2 + z * 2, 1 + z * 5);
+      }
+      const kart = (x, y, s, color) => {
+        g.fillStyle = color; g.fillRect(x - 6 * s, y - 4 * s, 12 * s, 5 * s);
+        g.fillStyle = '#222'; g.fillRect(x - 7 * s, y, 3 * s, 3 * s); g.fillRect(x + 4 * s, y, 3 * s, 3 * s);
+        g.fillStyle = color; g.fillRect(x - 2 * s, y - 8 * s, 4 * s, 4 * s);   // helmet
+      };
+      kart(w / 2 + Math.sin(t * 1.3) * 16, 72, 0.8, '#b07dff');
+      kart(w / 2 + Math.sin(t * 1.7 + 2) * 24, 84, 1.1, '#3dff6b');
+      kart(w / 2 + Math.sin(t * 0.9) * 10, 106, 1.6, '#3d8bff');
+      g.fillStyle = '#3d8bff'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('GO! GO! GO!', w / 2, 118);
     } else if (game.screen === 'sword') {
       // Two knights clashing swords in the colosseum
       const grd = g.createLinearGradient(0, 0, 0, h);
