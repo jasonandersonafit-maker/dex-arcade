@@ -86,7 +86,7 @@
     <h1>SANDBOX RANGE</h1>
     <p>Grab any of 15 weapons from the Armory tables and blast everything on the range: targets, bottles, exploding barrels, zombie dummies and a giant training dummy. Shoot the big red button to launch clay pigeons, and hop in the TANK parked by the Armory!</p>
     <div class="controls">
-      <div><b>PC</b>Mouse: look · Click: shoot<br>Rockets: pick up the Rocket Launcher<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9, 0 / wheel: switch weapon<br>E at the tank: drive it!<br>T: reset targets · P: pause</div>
+      <div><b>PC</b>Mouse: look · Click: shoot<br>Hold right click: missiles!<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9, 0 / wheel: switch weapon<br>E at the tank: drive it!<br>T: reset targets · P: pause</div>
       <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot<br>Grip = E: pick up a weapon,<br>get in / out of the tank<br>Reach over your shoulder + grip:<br>grab the RPG, trigger fires rockets!<br>A: jump · B: next weapon<br>X: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
@@ -845,7 +845,7 @@ function pickUp(p) {
   const first = !owned.some(Boolean);
   if (!owned[p.index]) { owned[p.index] = true; tone(880, 0.1, 'triangle', 0.1, 1320); tone(1320, 0.15, 'triangle', 0.08, 1320, 0.08); }
   equip(p.index);
-  if (first) $('tipLine').textContent = 'SHOOT EVERYTHING! · GRAB THE ROCKET LAUNCHER FOR ROCKETS · T: RESET';
+  if (first) $('tipLine').textContent = 'SHOOT EVERYTHING! · HOLD RIGHT CLICK: MISSILES · T: RESET';
 }
 
 // Hotbar (Minecraft style): shows the guns you've picked up, in order. Keys 1-9 and 0 pick them.
@@ -1158,11 +1158,10 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (renderer.xr.isPresenting || state !== 'play' || paused) return;
   if (!locked && !freeLook) { lockMouse(); return; }
   if (e.button === 0) firing = true;
-  // Right click: aim down the scope with the sniper; in the tank, its missiles.
-  // On foot, rockets only come from the Rocket Launcher.
+  // Right click: aim down the scope with the sniper, otherwise full-auto missiles
   if (e.button === 2) {
     if (current >= 0 && WEAPONS[current].zoom && !tank.inside) zoomed = true;
-    else if (tank.inside) rightMissiles = true;
+    else rightMissiles = true;
   }
 });
 addEventListener('mouseup', e => {
