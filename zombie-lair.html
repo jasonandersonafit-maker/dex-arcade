@@ -110,7 +110,21 @@ document.body.appendChild(vrButton);
 if (!navigator.xr) vrButton.style.display = 'none';
 else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) vrButton.style.display = 'none'; }).catch(() => { vrButton.style.display = 'none'; });
 // Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
-const inQuestApp = window.getDigitalGoodsService !== undefined;
+// Quest pause buttons, read straight from the headset: X pauses / resumes, Y while paused goes back to the arcade
+let vrXWasDown = false;
+function vrPauseButtons() {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  let x = false, y = false;
+  for (const src of session.inputSources) {
+    if (src.handedness !== 'left' || !src.gamepad) continue;
+    x = !!src.gamepad.buttons[4]?.pressed;
+    y = !!src.gamepad.buttons[5]?.pressed;
+  }
+  if (x && !vrXWasDown) setPaused(!paused);
+  vrXWasDown = x;
+  if (paused && y) goToArcade();
+}const inQuestApp = window.getDigitalGoodsService !== undefined;
 if (inQuestApp && navigator.xr) {
   navigator.xr.isSessionSupported('immersive-vr').then(ok => {
     if (!ok || renderer.xr.isPresenting) return;
@@ -1899,6 +1913,7 @@ function updateZombies(dt) {
 const clock = new THREE.Clock();
 const aimPoint = new THREE.Vector3();
 renderer.setAnimationLoop(() => {
+  vrPauseButtons();
   const dt = Math.min(clock.getDelta(), 0.05);
 
   // X button on the left Quest controller toggles pause
@@ -1906,8 +1921,6 @@ renderer.setAnimationLoop(() => {
     const pad = c.userData.input?.gamepad;
     if (!pad || c.userData.input.handedness !== 'left') continue;
     const pressed = !!pad.buttons[4]?.pressed;
-    if (pressed && !c.userData.xWasPressed) setPaused(!paused);
-    c.userData.xWasPressed = pressed;
     // Y button while paused: back to the arcade
     if (paused && pad.buttons[5]?.pressed) goToArcade();
   }
