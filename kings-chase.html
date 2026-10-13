@@ -57,7 +57,7 @@
 <div id="intro" class="overlay">
   <div class="card">
     <h1>KING'S CHASE</h1>
-    <p>The Zombie King is after you! Run to the glowing purple portal before he catches you. He smashes through trees and gets faster the longer you run.</p>
+    <p>The Zombie King is after you! Run all the way to the disco dance floor at the end before he catches you. He smashes through trees and gets faster the longer you run.</p>
     <div class="controls">
       <div><b>PC</b>Mouse: look<br>W A S D: move<br>Space: jump<br>P: pause</div>
       <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>A: jump<br>X: pause</div>
@@ -97,7 +97,7 @@ const KING_START_SPEED = WALK_SPEED;   // same pace as you: every slip-up lets h
 const KING_MAX_SPEED = WALK_SPEED;
 const KING_SPEEDUP = 0;          // extra speed per second of running (0 = he never speeds up)
 const KING_HEAD_START = 3;       // seconds before the King starts chasing
-const COURSE_LENGTH = 220;       // blocks from start to the portal
+const COURSE_LENGTH = 220;       // blocks from start to the disco at the end
 // Mouse turning uses Minecraft's exact formula. Sensitivity 0.5 is Minecraft's default ("100%"),
 // which turns you 0.15 degrees per pixel of mouse movement. Change it in the pause menu.
 let mcSensitivity = 0.5;
@@ -239,13 +239,109 @@ for (let i = 0; i < 60; i++) {
   }
   put(x, base + 5, z, LEAVES);
 }
-// The portal at the finish
-const PX = W / 2 - 2;
-for (let y = 4; y <= 9; y++) for (let x = PX - 1; x <= PX + 4; x++) {
-  const frame = x === PX - 1 || x === PX + 4 || y === 4 || y === 9;
-  put(x, y, FINISH_Z, frame ? OBSIDIAN : PORTAL);
+// (The finish is a disco dance floor now: see "The disco at the finish" below)
+
+// ---------- The disco at the finish ----------
+// A light-up dance floor across the end of the course, a spinning disco ball and sweeping light beams.
+// Step onto the dance floor to win!
+const DISCO_X0 = 1, DISCO_X1 = W - 2, DISCO_Z0 = FINISH_Z, DISCO_Z1 = L - 2;
+const DISCO_COLORS = [0xff3df2, 0x33f0ff, 0xffd23d, 0x7dff6b, 0xff7a3d, 0xb07dff].map(c => new THREE.Color(c));
+const discoTiles = [];
+const discoFloor = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.1, 0.94), new THREE.MeshBasicMaterial({ color: 0xffffff }),
+  (DISCO_X1 - DISCO_X0 + 1) * (DISCO_Z1 - DISCO_Z0 + 1));
+{
+  const m4 = new THREE.Matrix4();
+  for (let z = DISCO_Z0; z <= DISCO_Z1; z++) for (let x = DISCO_X0; x <= DISCO_X1; x++) {
+    const i = discoTiles.length;
+    discoFloor.setMatrixAt(i, m4.makeTranslation(x + 0.5, 4.05, z + 0.5));
+    discoFloor.setColorAt(i, DISCO_COLORS[(x + z) % DISCO_COLORS.length]);
+    discoTiles.push({ x, z });
+  }
 }
-for (let x = PX - 1; x <= PX + 4; x++) put(x, 3, FINISH_Z, OBSIDIAN);
+scene.add(discoFloor);
+const glowTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.35, 'rgba(255,255,255,0.4)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const discoCenter = new THREE.Vector3(W / 2, 11, (DISCO_Z0 + DISCO_Z1) / 2 + 0.5);
+// Mirror disco ball on a string
+const discoBall = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16), new THREE.MeshStandardMaterial({
+  metalness: 1, roughness: 0.15, emissive: 0x333344,
+  map: (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 32; const g = c.getContext('2d');
+    for (let y = 0; y < 32; y += 4) for (let x = 0; x < 64; x += 4) { const v = 150 + Math.random() * 105 | 0; g.fillStyle = `rgb(${v},${v},${v + 10})`; g.fillRect(x, y, 3, 3); }
+    const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; return t; })() }));
+discoBall.position.copy(discoCenter);
+scene.add(discoBall);
+const string = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 8, 6), new THREE.MeshBasicMaterial({ color: 0x222222 }));
+string.position.copy(discoCenter).add(new THREE.Vector3(0, 5, 0));
+scene.add(string);
+const sparkles = [];
+for (let i = 0; i < 24; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+  s.position.copy(dir.multiplyScalar(1.15)); s.scale.setScalar(0.35);
+  discoBall.add(s); sparkles.push(s);
+}
+// Colored light beams sweeping out of the ball
+const discoBeams = new THREE.Group();
+discoBeams.position.copy(discoCenter);
+DISCO_COLORS.forEach((col, i) => {
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(0.55, 9, 16, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  beam.geometry.translate(0, -4.5, 0);   // cone tip at the ball, opening downward
+  const holder = new THREE.Group();
+  holder.rotation.set(0.6 + (i % 2) * 0.25, (i / DISCO_COLORS.length) * Math.PI * 2, 0, 'YXZ');
+  holder.add(beam);
+  discoBeams.add(holder);
+});
+discoBeams.rotation.order = 'YXZ';
+scene.add(discoBeams);
+const discoLights = DISCO_COLORS.slice(0, 3).map(col => { const l = new THREE.PointLight(col, 18, 16); scene.add(l); return l; });
+let discoTimer = 0;
+function updateDisco(dt, t, party) {
+  discoBall.rotation.y += dt * 0.8;
+  discoBeams.rotation.y = -t * (party ? 1.4 : 0.6);
+  for (const s of sparkles) s.material.opacity = Math.random() < 0.15 ? 1 : 0.15;
+  discoLights.forEach((l, i) => l.position.set(W / 2 + Math.sin(t * 1.3 + i * 2) * 8, 7, discoCenter.z + Math.cos(t * 1.1 + i * 2) * 4));
+  // Floor pattern changes in time with the beat
+  discoTimer -= dt;
+  if (discoTimer > 0) return;
+  discoTimer = party ? 0.12 : 0.25;
+  const beat = Math.floor(t * (party ? 8 : 4)), mode = Math.floor(t / 4) % 3;
+  const n = DISCO_COLORS.length, cx = W / 2, cz = (DISCO_Z0 + DISCO_Z1) / 2;
+  discoTiles.forEach((tile, i) => {
+    let k;
+    if (mode === 0) k = tile.x + tile.z + beat;                                                      // rainbow stripes
+    else if (mode === 1) k = (tile.x + tile.z) % 2 ? beat : beat + 3;                                // flashing checkerboard
+    else k = Math.floor(Math.hypot(tile.x - cx, tile.z - cz)) - beat;                               // rings rippling out
+    discoFloor.setColorAt(i, DISCO_COLORS[((k % n) + n) % n]);
+  });
+  discoFloor.instanceColor.needsUpdate = true;
+}
+
+// Disco music for the dance party when you win
+let discoMusic = null;
+function startDiscoMusic() {
+  if (discoMusic) return;
+  const bass = [55, 55, 82.4, 73.4, 65.4, 65.4, 82.4, 98];
+  let step = 0;
+  discoMusic = setInterval(() => {
+    if (paused) return;
+    const a = ac(), t0 = a.currentTime;
+    if (step % 2 === 0) { beep(60, 0.18, 'sine', 0.35); }                              // kick drum
+    else noise(0.05, 'highpass', 7000, 0.12);                                         // hi-hat
+    if (step % 4 === 2) noise(0.12, 'bandpass', 1800, 0.18);                          // clap
+    const f = bass[Math.floor(step / 2) % bass.length];
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = 'sawtooth'; o.frequency.value = f * 2;
+    g.gain.setValueAtTime(0.05, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.2);
+    o.connect(g).connect(a.destination); o.start(); o.stop(t0 + 0.22);
+    step++;
+  }, 250);
+}
+function stopDiscoMusic() { if (discoMusic) { clearInterval(discoMusic); discoMusic = null; } }
 
 // ---------- Turn the grid into instanced meshes (only blocks you could see) ----------
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -517,6 +613,7 @@ function resetWorld() {
 }
 
 function startGame() {
+  stopDiscoMusic();
   resetWorld();
   state = 'countdown'; stateT = 0; runT = 0;
   $('intro').hidden = true;
@@ -532,9 +629,10 @@ function endGame(won) {
   state = won ? 'escaped' : 'caught';
   stateT = 0;
   if (won) {
-    showMessage('YOU ESCAPED!', `time ${runT.toFixed(1)}s · ${pressToRestart()}`, '#c070ff');
+    showMessage('DANCE PARTY!', `you escaped in ${runT.toFixed(1)}s · ${pressToRestart()}`, '#ff3df2');
     [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => beep(f, 0.25, 'square', 0.1), i * 120));
-    burst(player.pos.clone().add(new THREE.Vector3(0, 1.5, 1.5)), 0xc070ff, 40, 6);
+    for (const c of [0xff3df2, 0x33f0ff, 0xffd23d]) burst(player.pos.clone().add(new THREE.Vector3(0, 2, 0)), c, 20, 6);
+    setTimeout(startDiscoMusic, 700);
   } else {
     showMessage('THE KING GOT YOU!', `you ran ${Math.max(0, Math.floor(player.pos.z - START_Z))} blocks · ${pressToRestart()}`, '#ff3d3d');
     roar();
@@ -706,7 +804,7 @@ renderer.setAnimationLoop(() => {
   const inVR = renderer.xr.isPresenting;
 
   // Always-on scenery motion
-  TEX.portal.offset.y -= dt * 0.25;
+  updateDisco(dt, t, state === 'escaped');
   for (const c of clouds) { c.position.x += dt * 0.8; if (c.position.x > W + 50) c.position.x = -50; }
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
@@ -832,7 +930,7 @@ renderer.setAnimationLoop(() => {
       heartbeatT -= dt;
       if (dist < 10 && heartbeatT <= 0) { beep(60, 0.12, 'sine', 0.35); setTimeout(() => beep(55, 0.12, 'sine', 0.25), 160); heartbeatT = 0.4 + dist * 0.08; }
     }
-    // Made it to the portal?
+    // Made it to the dance floor?
     if (state === 'run' && player.pos.z >= FINISH_Z) endGame(true);
     if (state !== 'run') $('danger').style.opacity = state === 'caught' ? '0.6' : '0';
   }
@@ -845,6 +943,15 @@ renderer.setAnimationLoop(() => {
   ku.arms[1].rotation.x = -Math.PI / 2 - Math.sin(kingState.phase * 0.5) * 0.2;
   ku.head.rotation.z = Math.sin(t * 2) * 0.12;
   if (state === 'caught') { ku.arms[0].rotation.x = ku.arms[1].rotation.x = -Math.PI * 0.9 + Math.sin(t * 6) * 0.2; }
+  if (state === 'escaped') {   // the King can't resist the music: he dances!
+    const b = t * Math.PI * 2;   // two beats per second
+    ku.arms[0].rotation.x = -Math.PI * 0.85 + Math.sin(b) * 0.5;
+    ku.arms[1].rotation.x = -Math.PI * 0.15 - Math.sin(b) * 0.5;
+    ku.legs[0].rotation.x = Math.max(0, Math.sin(b)) * 0.5; ku.legs[1].rotation.x = Math.max(0, -Math.sin(b)) * 0.5;
+    ku.head.rotation.z = Math.sin(b) * 0.3;
+    king.position.y = kingState.pos.y + Math.abs(Math.sin(b)) * 0.4;
+    king.rotation.y = t * 1.5;
+  }
 
   // Put the camera at the player's eyes
   rig.position.copy(player.pos);
