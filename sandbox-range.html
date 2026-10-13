@@ -29,7 +29,7 @@
   #scope svg { position:absolute; left:50%; top:50%; width:76vmin; height:76vmin; transform:translate(-50%,-50%); }
   #prompt { position:fixed; left:0; right:0; top:58%; text-align:center; font-size:11px; color:var(--gold); text-shadow:2px 2px 0 #000; pointer-events:none; }
   #weaponName { position:fixed; left:0; right:0; bottom:136px; text-align:center; font-size:11px; text-shadow:2px 2px 0 #000; pointer-events:none; }
-  #hotbar { position:fixed; left:50%; bottom:68px; transform:translateX(-50%); display:flex; gap:2px; padding:3px; background:rgba(0,0,0,.55); border:2px solid #000; pointer-events:none; }
+  #hotbar { position:fixed; left:50%; bottom:68px; transform:translateX(-50%); display:flex; flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 32px); gap:2px; padding:3px; background:rgba(0,0,0,.55); border:2px solid #000; pointer-events:none; }
   .slot { width:52px; height:52px; box-sizing:border-box; border:3px solid #5a5a5a; background:rgba(60,60,60,.6); position:relative;
           display:flex; align-items:center; justify-content:center; font-size:7px; text-align:center; line-height:1.3; color:#fff; }
   .slot .n { position:absolute; left:3px; top:3px; font-size:7px; color:#ccc; }
@@ -84,10 +84,10 @@
 <div id="intro" class="overlay">
   <div class="card">
     <h1>SANDBOX RANGE</h1>
-    <p>Grab weapons from the Armory tables and blast everything on the range: targets, bottles, exploding barrels, zombie dummies and a giant training dummy. Shoot the big red button to launch clay pigeons!</p>
+    <p>Grab any of 15 weapons from the Armory tables and blast everything on the range: targets, bottles, exploding barrels, zombie dummies and a giant training dummy. Shoot the big red button to launch clay pigeons, and hop in the TANK parked by the Armory!</p>
     <div class="controls">
-      <div><b>PC</b>Mouse: look · Click: shoot<br>Hold E or right click: missiles!<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9 / wheel: switch weapon<br>T: reset targets · P: pause</div>
-      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot / pick up<br>(point at a weapon to grab it)<br>Hold left trigger: missiles!<br>A: jump · B: next weapon<br>X: pause</div>
+      <div><b>PC</b>Mouse: look · Click: shoot<br>Hold E or right click: missiles!<br>E at a table: pick up weapon<br>Right click + sniper: scope<br>W A S D: move · Space: jump<br>1-9, 0 / wheel: switch weapon<br>E at the tank: drive it!<br>T: reset targets · P: pause</div>
+      <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>Right trigger: shoot / pick up<br>(point at a weapon to grab it)<br>Hold left trigger: missiles!<br>A: jump · B: next weapon<br>Left grip at the tank: drive it!<br>X: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
     <a class="back" href="index.html">← Back to Arcade</a>
@@ -139,6 +139,13 @@ const WEAPONS = [
   { id: 'grenade', name: 'GRENADE LAUNCHER',  color: '#8aa83a', delay: 0.6,  dmg: 30, pellets: 1, spread: 0,     kind: 'grenade', auto: false, kick: 1.4 },
   { id: 'plasma',  name: 'PLASMA RIFLE',      color: '#ff3df2', delay: 0.1,  dmg: 2,  pellets: 1, spread: 0.005, kind: 'hitscan', auto: true,  kick: 0.5, pierce: true, tracer: 0xff8af7 },
   { id: 'laser',   name: 'LASER BEAM',        color: '#ff2020', delay: 0,    dmg: 30, pellets: 1, spread: 0,     kind: 'laser',   auto: true,  kick: 0 },
+  // New guns
+  { id: 'revolver', name: 'REVOLVER',         color: '#e8c070', delay: 0.45, dmg: 6,  pellets: 1, spread: 0.002, kind: 'hitscan', auto: false, kick: 1.8 },
+  { id: 'burst',   name: 'BURST RIFLE',       color: '#4ad0a0', delay: 0.45, dmg: 2,  pellets: 1, spread: 0.008, kind: 'hitscan', auto: false, kick: 0.6, burst: 3 },
+  { id: 'railgun', name: 'RAILGUN',           color: '#5ab0ff', delay: 1.2,  dmg: 20, pellets: 1, spread: 0,     kind: 'hitscan', auto: false, kick: 2.5, pierce: true, tracer: 0x5ab0ff, rail: true },
+  { id: 'flame',   name: 'FLAMETHROWER',      color: '#ff6a20', delay: 0,    dmg: 20, pellets: 1, spread: 0,     kind: 'flame',   auto: true,  kick: 0 },
+  { id: 'freeze',  name: 'FREEZE RAY',        color: '#9ae8ff', delay: 0,    dmg: 6,  pellets: 1, spread: 0,     kind: 'laser',   auto: true,  kick: 0, freeze: true },
+  { id: 'cluster', name: 'CLUSTER LAUNCHER',  color: '#c070ff', delay: 1.0,  dmg: 30, pellets: 1, spread: 0,     kind: 'grenade', auto: false, kick: 1.6, cluster: true },
 ];
 
 // ---------- Basic setup ----------
@@ -235,7 +242,7 @@ const sandbagTex = canvasTex(16, 16, (g) => { for (let y = 0; y < 16; y++) for (
 
 // The Armory: 3 weapon tables behind where you start
 const TABLE_Y = 1;
-for (const x of [-5, 0, 5]) solidBox(3.6, TABLE_Y, 1.2, x, 0, 6, 0xffffff, woodTex);
+for (const x of [-10, -5, 0, 5, 10]) solidBox(3.6, TABLE_Y, 1.2, x, 0, 6, 0xffffff, woodTex);   // 5 tables, 3 guns each
 // Cover around the range
 solidBox(1.5, 1.5, 1.5, -8, 0, -4, 0xffffff, crateTex); solidBox(1.5, 1.5, 1.5, -8, 1.5, -4, 0xffffff, crateTex);
 solidBox(1.5, 1.5, 1.5, 9, 0, -6, 0xffffff, crateTex);
@@ -290,6 +297,9 @@ const SOUNDS = {
   rocket: () => { noise(0.6, 'bandpass', 700, 0.4); tone(200, 0.5, 'sawtooth', 0.1, 80); },
   grenade: () => { tone(300, 0.15, 'square', 0.15, 120); noise(0.1, 'lowpass', 800, 0.3); },
   plasma: () => { tone(1400, 0.12, 'sawtooth', 0.06, 500); tone(300, 0.12, 'sine', 0.15); },
+  revolver: () => { noise(0.35, 'lowpass', 1800, 0.6); tone(110, 0.25, 'sine', 0.4); },
+  railgun: () => { tone(200, 0.5, 'sawtooth', 0.1, 2400); noise(0.5, 'highpass', 3000, 0.3); tone(80, 0.4, 'sine', 0.4); },
+  cluster: () => { tone(260, 0.2, 'square', 0.15, 100); noise(0.15, 'lowpass', 700, 0.35); },
 };
 let laserOsc = null;
 function laserSound(on) {
@@ -483,19 +493,41 @@ function makeZombieDummy(z, x0, x1, speed) {
   head.userData.head = true;
   g.position.set(x0, 0, z);
   scene.add(g);
-  const t = { hits: [head, torso, ...legs], hp: 3, dir: 1, fall: 0,
+  const mats = [skin, shirt, pants], baseColors = mats.map(m => m.color.getHex());
+  const t = { hits: [head, torso, ...legs], hp: 3, dir: 1, fall: 0, frozen: 0,
+    // Freeze ray: frozen solid (icy blue, can't move). Shoot it while frozen to smash it to pieces!
+    freeze(sec) {
+      if (this.fall > 0) return;
+      if (this.frozen <= 0) tone(2400, 0.3, 'sine', 0.06, 3200);
+      this.frozen = Math.max(this.frozen, sec);
+      mats.forEach(m => m.color.set(0x9ae8ff));
+    },
     hit(point, dmg, mesh) {
       if (this.fall > 0) return;
+      if (this.frozen > 0 && WEAPONS[current]?.freeze !== true) {
+        this.frozen = 0; this.fall = 4;
+        g.visible = false;
+        shatter(g.position.clone().setY(1), 0xc8f4ff, 40, 6, 0.1, 1.5);   // ICE SMASH
+        noise(0.4, 'highpass', 3500, 0.4);
+        addScore(100);
+        return;
+      }
+      if (this.frozen > 0) return;   // the freeze ray itself doesn't hurt a frozen dummy
       this.hp -= mesh?.userData.head ? 3 * dmg : dmg;
       shatter(point, 0x4f9a2a, 6, 3, 0.05, 0.6);
       if (this.hp <= 0) { this.fall = 4; addScore(mesh?.userData.head ? 75 : 50); noise(0.3, 'lowpass', 400, 0.3); }
     },
-    blast() { if (this.fall <= 0) { this.fall = 4; addScore(50); } },
+    blast() { if (this.fall <= 0) { this.fall = 4; this.frozen = 0; addScore(50); } },
     update(dt) {
       if (this.fall > 0) {
         this.fall -= dt;
         g.rotation.x = THREE.MathUtils.lerp(g.rotation.x, -Math.PI / 2, dt * 8);
-        if (this.fall <= 0) { this.hp = 3; g.rotation.x = 0; }
+        if (this.fall <= 0) { this.hp = 3; g.rotation.x = 0; g.visible = true; mats.forEach((m, n) => m.color.setHex(baseColors[n])); }
+        return;
+      }
+      if (this.frozen > 0) {   // stuck in place until it thaws
+        this.frozen -= dt;
+        if (this.frozen <= 0) mats.forEach((m, n) => m.color.setHex(baseColors[n]));
         return;
       }
       g.position.x += this.dir * speed * dt;
@@ -616,7 +648,8 @@ function explode(pos, radius, points = 0, huge = false) {
   }
   // Knock you around a little if you're close
   const pd = player.pos.clone().setY(pos.y).distanceTo(pos);
-  if (pd < radius) { const push = player.pos.clone().sub(pos).setY(0).normalize().multiplyScalar(8 * (1 - pd / radius)); player.vel.add(push); player.vel.y += 4 * (1 - pd / radius); }
+  // (the tank is too heavy to get pushed)
+  if (pd < radius && !tank.inside) { const push = player.pos.clone().sub(pos).setY(0).normalize().multiplyScalar(8 * (1 - pd / radius)); player.vel.add(push); player.vel.y += 4 * (1 - pd / radius); }
 }
 
 // ---------- Guns: 3D models ----------
@@ -664,6 +697,34 @@ function buildGun(w) {
       C(0.025, 0.035, 0.12, new THREE.MeshStandardMaterial({ color: 0xe8e8f0 }), 0, 0.01, -0.24);
       { const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.035), accent); crystal.position.set(0, 0.07, -0.02); model.add(crystal); }
       B(0.045, 0.12, 0.05, dark, 0, -0.09, 0.06); muzzleZ = -0.31; break;
+    case 'revolver':
+      C(0.016, 0.016, 0.22, metal, 0, 0.02, -0.14); B(0.05, 0.07, 0.1, metal, 0, 0.01, 0.02);
+      { const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.07, 6), metal); cyl.rotation.x = Math.PI / 2; cyl.position.set(0, 0.0, -0.01); model.add(cyl); }
+      B(0.045, 0.13, 0.05, new THREE.MeshStandardMaterial({ color: 0x6a4020 }), 0, -0.09, 0.07); B(0.052, 0.01, 0.08, accent, 0, 0.045, 0.02); muzzleZ = -0.26; break;
+    case 'burst':
+      B(0.055, 0.09, 0.36, metal, 0, 0, 0); C(0.014, 0.014, 0.18, metal, 0, 0.015, -0.27); B(0.04, 0.12, 0.05, dark, 0, -0.1, -0.05);
+      B(0.045, 0.12, 0.05, dark, 0, -0.09, 0.08); B(0.04, 0.07, 0.16, dark, 0, -0.01, 0.24); B(0.03, 0.04, 0.12, dark, 0, 0.07, -0.02);
+      B(0.057, 0.012, 0.3, accent, 0, 0.05, 0); muzzleZ = -0.37; break;
+    case 'railgun':
+      B(0.07, 0.1, 0.4, new THREE.MeshStandardMaterial({ color: 0x1a2a40, metalness: 0.7, roughness: 0.3 }), 0, 0, 0);
+      for (const x of [-0.03, 0.03]) B(0.012, 0.03, 0.5, metal, x, 0.02, -0.38);   // twin rails
+      B(0.02, 0.02, 0.42, accent, 0, 0.02, -0.36);                                   // glowing core
+      B(0.045, 0.12, 0.05, dark, 0, -0.1, 0.08); B(0.04, 0.07, 0.16, dark, 0, -0.01, 0.26); muzzleZ = -0.64; break;
+    case 'flame':
+      B(0.06, 0.08, 0.3, metal, 0, 0, 0); C(0.022, 0.035, 0.2, metal, 0, 0.01, -0.24);
+      { const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.26, 12), new THREE.MeshStandardMaterial({ color: 0xc02a1a })); tank.position.set(0, -0.1, -0.02); tank.rotation.x = Math.PI / 2; model.add(tank); }
+      { const pilot = glowSprite(0x3a8aff, 0.08, 0.9); pilot.position.set(0, -0.01, -0.35); model.add(pilot); }
+      B(0.045, 0.12, 0.05, dark, 0, -0.09, 0.12); muzzleZ = -0.35; break;
+    case 'freeze':
+      B(0.06, 0.08, 0.32, new THREE.MeshStandardMaterial({ color: 0xd8f0ff, metalness: 0.4, roughness: 0.2 }), 0, 0, 0);
+      C(0.02, 0.04, 0.14, new THREE.MeshStandardMaterial({ color: 0xd8f0ff }), 0, 0.01, -0.22);
+      for (let i = 0; i < 3; i++) { const c = new THREE.Mesh(new THREE.OctahedronGeometry(0.022), accent); c.position.set(0, 0.07, 0.06 - i * 0.07); model.add(c); }   // ice crystals
+      B(0.045, 0.12, 0.05, dark, 0, -0.09, 0.06); muzzleZ = -0.3; break;
+    case 'cluster':
+      B(0.07, 0.09, 0.28, metal, 0, 0, 0.04); C(0.05, 0.05, 0.3, new THREE.MeshStandardMaterial({ color: 0x4a2a6a }), 0, 0.02, -0.24);
+      spinner = new THREE.Group(); spinner.position.set(0, -0.03, -0.02); model.add(spinner);
+      for (let i = 0; i < 5; i++) { const a = i / 5 * Math.PI * 2; const s = new THREE.Mesh(new THREE.SphereGeometry(0.025, 8, 6), accent); s.position.set(Math.cos(a) * 0.06, Math.sin(a) * 0.06, 0); spinner.add(s); }
+      B(0.045, 0.12, 0.05, dark, 0, -0.1, 0.12); muzzleZ = -0.4; break;
   }
   const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.015, muzzleZ); model.add(muzzle);
   const flash = new THREE.Mesh(new THREE.SphereGeometry(w.pellets > 1 || w.id === 'rocket' ? 0.05 : 0.03, 8, 8), new THREE.MeshBasicMaterial({ color: w.tracer ?? 0xffd060 }));
@@ -677,7 +738,7 @@ const pickups = [];
 WEAPONS.forEach((w, i) => {
   const table = Math.floor(i / 3), slot = i % 3;
   const gun = buildGun(w);
-  gun.position.set(-5 + table * 5 + (slot - 1) * 1.1, TABLE_Y + 0.35, 6);
+  gun.position.set(-10 + table * 5 + (slot - 1) * 1.1, TABLE_Y + 0.35, 6);
   gun.rotation.y = Math.PI / 2;
   gun.scale.setScalar(1.25);
   scene.add(gun);
@@ -773,14 +834,21 @@ function pickUp(p) {
   if (first) $('tipLine').textContent = 'SHOOT EVERYTHING! · HOLD E OR RIGHT CLICK: MISSILES · T: RESET';
 }
 
-// Hotbar (Minecraft style)
+// Hotbar (Minecraft style): shows the guns you've picked up, in order. Keys 1-9 and 0 pick them.
+const ownedList = () => WEAPONS.map((w, i) => i).filter(i => owned[i]);
 function renderHotbar() {
   const hb = $('hotbar');
   hb.innerHTML = '';
-  WEAPONS.forEach((w, i) => {
+  const list = ownedList();
+  if (!list.length) {   // nothing yet: show empty slots
+    for (let n = 1; n <= 9; n++) { const s = document.createElement('div'); s.className = 'slot empty'; s.innerHTML = `<span class="n">${n}</span>`; hb.appendChild(s); }
+    return;
+  }
+  list.forEach((i, n) => {
+    const w = WEAPONS[i];
     const s = document.createElement('div');
-    s.className = 'slot' + (owned[i] ? '' : ' empty') + (i === current ? ' sel' : '');
-    s.innerHTML = `<span class="n">${i + 1}</span><div class="icon" style="background:${w.color}"></div>`;
+    s.className = 'slot' + (i === current ? ' sel' : '');
+    s.innerHTML = `<span class="n">${n < 9 ? n + 1 : n === 9 ? 0 : ''}</span><div class="icon" style="background:${w.color}"></div>`;
     s.title = w.name;
     hb.appendChild(s);
   });
@@ -827,8 +895,66 @@ function fireHitscan(w) {
       }
     }
     tracer(from, end, w.tracer ?? 0xffe28a);
+    if (w.rail) railBeam(from, end);
   }
 }
+// The railgun leaves a thick glowing blue beam that fades away
+function railBeam(from, end) {
+  const len = from.distanceTo(end);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, len, 10, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x7ac8ff, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false }));
+  m.position.copy(from).add(end).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(from).normalize());
+  m.userData = { life: 0.4, max: 0.4 };
+  scene.add(m);
+  tracers.push(m);
+  shatter(end, 0x9ad8ff, 10, 4, 0.05, 0.6);
+}
+
+// Flamethrower: a short cone of fire that burns whatever is in front of you
+const flames = [];
+const flameMats = [0xff6a20, 0xffb030, 0xff3a10, 0xffe060].map(color => new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+let flameTickT = 0, flameSoundT = 0;
+function updateFlame(dt, on) {
+  if (!on) return;
+  const { dir } = aimRay();
+  const from = muzzlePos();
+  for (let i = 0; i < 4; i++) {
+    const s = new THREE.Sprite(flameMats[Math.floor(Math.random() * flameMats.length)]);
+    s.position.copy(from);
+    const v = dir.clone().add(new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.25)).normalize().multiplyScalar(11 + Math.random() * 4);
+    s.userData = { vel: v, life: 0.45 + Math.random() * 0.15 };
+    s.scale.setScalar(0.2);
+    scene.add(s);
+    flames.push(s);
+  }
+  flameSoundT -= dt;
+  if (flameSoundT <= 0) { noise(0.18, 'lowpass', 900, 0.18); flameSoundT = 0.1; }
+  flameTickT -= dt;
+  if (flameTickT <= 0) {
+    flameTickT = 0.1;   // burn damage in quick ticks
+    for (const t of targets) {
+      if (t.active === false || !t.hits[0]) continue;
+      const tp = t.hits[0].getWorldPosition(new THREE.Vector3());
+      const to = tp.clone().sub(from);
+      const d = to.length();
+      if (d < 7.5 && to.normalize().dot(dir) > 0.88) t.hit(tp, WEAPONS.find(w => w.id === 'flame').dmg * 0.1, t.hits[0]);
+    }
+  }
+}
+function updateFlames(dt) {
+  for (let i = flames.length - 1; i >= 0; i--) {
+    const s = flames[i], u = s.userData;
+    s.position.addScaledVector(u.vel, dt);
+    u.vel.multiplyScalar(1 - dt * 1.5); u.vel.y += dt * 3;   // fire slows down and rises
+    u.life -= dt;
+    s.scale.setScalar(0.2 + (0.6 - u.life) * 2.2);
+    if (u.life <= 0) { scene.remove(s); flames.splice(i, 1); }
+  }
+}
+
+// Burst rifle: one click fires 3 quick shots
+let burstLeft = 0, burstT = 0;
 
 const projectiles = [];
 // ---------- Full-auto missiles (hold right click / left trigger) ----------
@@ -837,13 +963,14 @@ let missileHeld = false, missileCooldown = 0;
 function launchMissile() {
   // Comes out of your gun if you're holding one, otherwise from just below your eyes
   let from;
-  if (current >= 0) from = muzzlePos();
+  if (tank.inside) from = tank.muzzle.getWorldPosition(new THREE.Vector3());   // missiles come out of the tank's barrel
+  else if (current >= 0) from = muzzlePos();
   else { const { origin, dir } = aimRay(); from = origin.clone().addScaledVector(dir, 0.5); from.y -= 0.3; }
   fireProjectile(WEAPONS[5], from, true);
   noise(0.25, 'bandpass', 800, 0.15);
 }
 
-function fireProjectile(w, fromOverride = null, light = false) {
+function fireProjectile(w, fromOverride = null, light = false, big = false) {
   const { origin, dir } = aimRay();
   const from = fromOverride || muzzlePos();
   const isRocket = w.kind === 'rocket';
@@ -867,7 +994,8 @@ function fireProjectile(w, fromOverride = null, light = false) {
   if (!isRocket) v.y += 3;
   mesh.lookAt(from.clone().add(v));
   scene.add(mesh);
-  projectiles.push({ mesh, vel: v, rocket: isRocket, life: isRocket ? 4 : 1.8, w, light });
+  if (big) mesh.scale.setScalar(2.2);   // tank shells are bigger
+  projectiles.push({ mesh, vel: v, rocket: isRocket, life: isRocket ? 4 : 1.8, w, light, big });
 }
 function updateProjectiles(dt) {
   for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -892,7 +1020,16 @@ function updateProjectiles(dt) {
       if (box) { p.mesh.position.copy(from); p.vel.x *= -0.5; p.vel.z *= -0.5; }
       for (const t of targets) { if (t.active === false || !t.hits[0]) continue; if (t.hits[0].getWorldPosition(tmpPos).distanceTo(p.mesh.position) < 0.6 && p.life < 1.6) boom = true; }
     }
-    if (boom) { scene.remove(p.mesh); projectiles.splice(i, 1); explode(p.mesh.position.clone(), p.rocket ? 4 : 3.5); }
+    if (boom) {
+      scene.remove(p.mesh); projectiles.splice(i, 1);
+      const at = p.mesh.position.clone();
+      explode(at, p.big ? 6 : p.rocket ? 4 : 3.5, 0, p.big);
+      // Cluster bomb: 5 more little explosions pop all around
+      if (p.w.cluster) for (let n = 0; n < 5; n++) {
+        const a = (n / 5) * Math.PI * 2 + Math.random(), r = 2 + Math.random() * 1.5;
+        setTimeout(() => explode(at.clone().add(new THREE.Vector3(Math.cos(a) * r, 0.3, Math.sin(a) * r)), 2.4), 150 + n * 90);
+      }
+    }
   }
 }
 
@@ -904,10 +1041,12 @@ const beamGlow = glowSprite(0xff4040, 0.6);
 beamGlow.visible = false;
 scene.add(beamGlow);
 let laserTickT = 0;
-function updateLaser(dt, on) {
+function updateLaser(dt, on, w = WEAPONS[8]) {
   beam.visible = beamGlow.visible = on;
   laserSound(on);
   if (!on) return;
+  beam.material.color.set(w.color);   // red laser or icy blue freeze ray
+  beamGlow.material.color.set(w.color);
   const { origin, dir } = aimRay();
   raycaster.set(origin, dir); raycaster.far = 120;
   const h = raycaster.intersectObjects([...hitMeshes(), ...obstacleMeshes, ground], false)[0];
@@ -923,16 +1062,26 @@ function updateLaser(dt, on) {
   if (laserTickT <= 0 && h) {
     laserTickT = 0.1;   // the beam deals its damage in quick ticks
     const t = h.object.userData.target;
-    if (t) t.hit(h.point, WEAPONS[8].dmg * 0.1, h.object);
-    shatter(h.point, 0xff6020, 2, 2, 0.04, 0.3);
+    if (t) {
+      if (w.freeze && t.freeze) t.freeze(3);   // freeze ray: zombie dummies freeze solid
+      else t.hit(h.point, w.dmg * 0.1, h.object);
+    }
+    shatter(h.point, w.freeze ? 0xc8f4ff : 0xff6020, 2, 2, 0.04, 0.3);
   }
 }
 
 function tryFire(dt) {
   if (current < 0) return;
   const w = WEAPONS[current], gun = heldGuns[current].userData;
-  if (w.kind === 'laser') { updateLaser(dt, firing); return; }
+  if (w.kind === 'laser') { updateLaser(dt, firing, w); return; }
   updateLaser(dt, false);
+  if (w.kind === 'flame') { updateFlame(dt, firing); return; }
+  // Burst rifle: keep firing the rest of the burst
+  if (burstLeft > 0) {
+    burstT -= dt;
+    if (burstT <= 0) { fireHitscan(w); SOUNDS.smg(); gun.kick = w.kick; gun.flashT = 0.04; burstLeft--; burstT = 0.07; }
+    return;
+  }
   // Minigun has to spin up first
   if (w.spinUp) {
     spin = THREE.MathUtils.clamp(spin + (firing ? dt / w.spinUp : -dt / 0.8), 0, 1);
@@ -943,6 +1092,7 @@ function tryFire(dt) {
   if (!firing || cooldown > 0) return;
   cooldown = w.delay;
   if (!w.auto) firing = false;   // one shot per click for semi-automatic guns
+  if (w.burst) { burstLeft = w.burst; burstT = 0; return; }
   if (w.kind === 'hitscan') fireHitscan(w); else fireProjectile(w);
   (SOUNDS[w.id] || SOUNDS.pistol)();
   gun.kick = w.kick; gun.flashT = 0.05;
@@ -996,7 +1146,7 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (e.button === 0) firing = true;
   // Right click: aim down the scope with the sniper, otherwise full-auto missiles
   if (e.button === 2) {
-    if (current >= 0 && WEAPONS[current].zoom) zoomed = true;
+    if (current >= 0 && WEAPONS[current].zoom && !tank.inside) zoomed = true;
     else rightMissiles = true;
   }
 });
@@ -1007,7 +1157,7 @@ addEventListener('mouseup', e => {
 let rightMissiles = false;   // missiles from right click (E has its own: missileHeld)
 let zoomToggled = false;   // Z turns the scope on and leaves it on
 addEventListener('wheel', e => {
-  if (state !== 'play' || paused || !owned.some(Boolean)) return;
+  if (state !== 'play' || paused || !owned.some(Boolean) || tank.inside) return;
   const dir = e.deltaY > 0 ? 1 : -1;
   let i = current;
   for (let n = 0; n < WEAPONS.length; n++) { i = (i + dir + WEAPONS.length) % WEAPONS.length; if (owned[i]) { equip(i); break; } }
@@ -1021,10 +1171,12 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyP' && !e.repeat) { setPaused(!paused); if (!paused) lockMouse(); }
   if (paused) return;
   const num = parseInt(e.key);
-  if (num >= 1 && num <= 9) equip(num - 1);
+  if (num >= 0 && num <= 9 && !inTank()) { const list = ownedList(); const slot = num === 0 ? 9 : num - 1; if (list[slot] !== undefined) equip(list[slot]); }
   // E: pick up the weapon you're standing next to, otherwise hold it for full-auto missiles
   if (e.code === 'KeyE' && !e.repeat) {
-    if (nearPickup) pickUp(nearPickup);
+    if (tank.inside) exitTank();                // E in the tank: climb out
+    else if (nearPickup) pickUp(nearPickup);
+    else if (nearTank()) enterTank();           // E next to the tank: climb in
     else missileHeld = true;
   }
   if (e.code === 'KeyT' && !e.repeat) resetTargets();
@@ -1049,6 +1201,7 @@ function setPaused(p) {
   paused = p;
   firing = false; zoomed = false; missileHeld = false; rightMissiles = false;
   laserSound(false); spinSound(0);
+  if (p) engineSound(false);   // the tank engine starts again when you resume
   $('pauseMenu').hidden = !p || renderer.xr.isPresenting;
   pauseSign.visible = p && renderer.xr.isPresenting;
   $('pauseBtn').hidden = p;
@@ -1147,6 +1300,10 @@ function readVR() {
       if (x && !c.userData.xWas) setPaused(!paused);
       c.userData.xWas = x;
       if (paused && pad.buttons[5]?.pressed) goToArcade();
+      // Left grip: climb into / out of the tank
+      const grip = !!pad.buttons[1]?.pressed;
+      if (grip && !c.userData.gripWas && state === 'play' && !paused) { if (tank.inside) exitTank(); else if (nearTank()) enterTank(); }
+      c.userData.gripWas = grip;
     }
     if (src.handedness === 'right' && ax.length >= 4) {
       if (pad.buttons[4]?.pressed) out.jump = true;
@@ -1158,6 +1315,155 @@ function readVR() {
     }
   }
   return out;
+}
+
+// ---------- The tank you can drive ----------
+const TANK_R = 2.3;               // how wide the tank is when bumping into things
+const TANK_SPEED = 10;            // top speed going forward (half that in reverse)
+const CANNON_RELOAD = 1.1;        // seconds between cannon shots
+const tank = { pos: new THREE.Vector3(17, 0, 1), yaw: 0, speed: 0, inside: false, cool: 0, kick: 0, shake: 0, wheels: [] };
+const tankGroup = new THREE.Group();
+{
+  const olive = new THREE.MeshStandardMaterial({ color: 0x5a6a3a, roughness: 0.8, metalness: 0.2 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x22241e, roughness: 0.9 });
+  const B = (w, h, d, m, x, y, z, parent = tankGroup) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); parent.add(b); return b; };
+  B(3, 0.9, 4.4, olive, 0, 0.95, 0);          // hull
+  B(2.6, 0.45, 3.2, olive, 0, 1.6, 0.2);      // upper hull
+  for (const x of [-1.55, 1.55]) {
+    B(0.72, 0.9, 4.7, dark, x, 0.5, 0);       // tracks
+    for (let i = 0; i < 6; i++) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.74, 14), dark);
+      w.rotation.z = Math.PI / 2; w.position.set(x, 0.42, -1.9 + i * 0.76);
+      tankGroup.add(w); tank.wheels.push(w);
+    }
+  }
+  tank.turret = new THREE.Group(); tank.turret.position.set(0, 1.85, 0.3); tankGroup.add(tank.turret);
+  B(1.9, 0.75, 2.1, olive, 0, 0.35, 0, tank.turret);
+  const hatch = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.15, 14), olive); hatch.position.set(0.4, 0.8, 0.3); tank.turret.add(hatch);
+  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.6, 6), dark); antenna.position.set(-0.7, 1.5, 0.7); tank.turret.add(antenna);
+  tank.barrelPivot = new THREE.Group(); tank.barrelPivot.position.set(0, 0.4, -1.0); tank.turret.add(tank.barrelPivot);
+  tank.barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 2.6, 12), olive);
+  tank.barrel.rotation.x = Math.PI / 2; tank.barrel.position.z = -1.3; tank.barrelPivot.add(tank.barrel);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.35, 12), dark); tip.rotation.x = Math.PI / 2; tip.position.z = -2.55; tank.barrelPivot.add(tip);
+  tank.muzzle = new THREE.Object3D(); tank.muzzle.position.z = -2.9; tank.barrelPivot.add(tank.muzzle);
+  // White stars on the turret
+  const starTex = canvasTex(128, 128, (g) => {
+    g.fillStyle = '#e8e8e0'; g.beginPath();
+    for (let i = 0; i < 10; i++) { const r = i % 2 ? 24 : 58, a = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(64 + Math.cos(a) * r, 64 + Math.sin(a) * r); }
+    g.closePath(); g.fill();
+  }, false);
+  for (const s of [-1, 1]) {
+    const star = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.6), new THREE.MeshLambertMaterial({ map: starTex, transparent: true }));
+    star.position.set(s * 0.96, 0.35, 0); star.rotation.y = s * Math.PI / 2; tank.turret.add(star);
+  }
+}
+tankGroup.position.copy(tank.pos);
+scene.add(tankGroup);
+const inTank = () => tank.inside;
+const nearTank = () => !tank.inside && Math.hypot(player.pos.x - tank.pos.x, player.pos.z - tank.pos.z) < 4.2;
+
+let engine = null;
+function engineSound(on, speed = 0) {
+  if (on && !engine) {
+    const a = ac(), o = a.createOscillator(), f = a.createBiquadFilter(), g = a.createGain();
+    o.type = 'sawtooth'; f.type = 'lowpass'; f.frequency.value = 380; g.gain.value = 0.05;
+    o.connect(f).connect(g).connect(master); o.start();
+    engine = { o };
+  }
+  if (!on && engine) { engine.o.stop(); engine = null; return; }
+  if (engine) engine.o.frequency.value = 38 + Math.abs(speed) * 7;
+}
+function enterTank() {
+  tank.inside = true;
+  firing = false; zoomed = false; burstLeft = 0; laserSound(false); spinSound(0);
+  heldGuns.forEach(g => { g.visible = false; });
+  player.yaw = tank.yaw; player.pitch = -0.08;
+  $('hotbar').hidden = true; $('weaponName').hidden = true; $('prompt').hidden = true;
+  showTip('TANK: W/S DRIVE · A/D TURN · MOUSE AIMS · CLICK: CANNON · HOLD RIGHT CLICK: MISSILES · E: GET OUT', 8);
+  tone(90, 0.6, 'sawtooth', 0.12, 160);
+}
+function exitTank() {
+  tank.inside = false; tank.speed = 0;
+  engineSound(false);
+  // Hop out on the tank's left side
+  player.pos.copy(tank.pos).addScaledVector(new THREE.Vector3(-Math.cos(tank.yaw), 0, Math.sin(tank.yaw)), 3.2);
+  player.pos.y = 0; player.vel.set(0, 0, 0);
+  if (current >= 0) heldGuns[current].visible = true;
+  $('hotbar').hidden = renderer.xr.isPresenting; $('weaponName').hidden = renderer.xr.isPresenting;
+  camera.position.set(0, EYE, 0);
+  tone(160, 0.3, 'square', 0.06, 90);
+}
+function fireCannon() {
+  tank.cool = CANNON_RELOAD; tank.kick = 1; tank.shake = 0.35;
+  const from = tank.muzzle.getWorldPosition(new THREE.Vector3());
+  fireProjectile(WEAPONS[5], from, false, true);   // a big shell with a big explosion
+  noise(0.9, 'lowpass', 700, 0.9); tone(55, 0.6, 'sine', 0.6, 30);
+  shatter(from, 0xffd060, 14, 5, 0.1, 0.4); shatter(from, 0x9a9a9a, 10, 2, 0.25, 1.2);
+  for (const c of controllers) c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(1, 200);
+}
+function updateTank(dt, inVR) {
+  let throttle = 0, turn = 0;
+  if (inVR) {
+    for (const c of controllers) {
+      const src = c.userData.input, ax = src?.gamepad?.axes;
+      if (src?.handedness === 'left' && ax?.length >= 4) { throttle = -ax[3]; turn = -ax[2]; }
+    }
+    if (Math.abs(throttle) < 0.15) throttle = 0;
+    if (Math.abs(turn) < 0.15) turn = 0;
+  } else {
+    if (keys.KeyW) throttle += 1; if (keys.KeyS) throttle -= 1;
+    if (keys.KeyA) turn += 1; if (keys.KeyD) turn -= 1;
+  }
+  // Drive
+  const target = throttle * (throttle < 0 ? TANK_SPEED * 0.5 : TANK_SPEED);
+  tank.speed += (target - tank.speed) * Math.min(1, dt * (throttle ? 1.2 : 2.5));
+  const yawBefore = tank.yaw;
+  tank.yaw += turn * 1.1 * dt;
+  tank.pos.addScaledVector(new THREE.Vector3(-Math.sin(tank.yaw), 0, -Math.cos(tank.yaw)), tank.speed * dt);
+  // Bump into crates, sandbags and tables
+  for (const b of obstacles) {
+    const cx = THREE.MathUtils.clamp(tank.pos.x, b.min.x, b.max.x), cz = THREE.MathUtils.clamp(tank.pos.z, b.min.z, b.max.z);
+    const dx = tank.pos.x - cx, dz = tank.pos.z - cz, d = Math.hypot(dx, dz);
+    if (d < TANK_R && d > 1e-4) {
+      tank.pos.x = cx + dx / d * TANK_R; tank.pos.z = cz + dz / d * TANK_R;
+      if (Math.abs(tank.speed) > 3) noise(0.25, 'lowpass', 300, 0.4);
+      tank.speed *= 0.4;
+    }
+  }
+  tank.pos.x = THREE.MathUtils.clamp(tank.pos.x, -WORLD + 3, WORLD - 3);
+  tank.pos.z = THREE.MathUtils.clamp(tank.pos.z, -WORLD - 12, WORLD - 33);
+  // Run things over!
+  if (Math.abs(tank.speed) > 2) for (const t of [...targets]) {
+    if (t.active === false || !t.hits[0] || (t.runOver || 0) > performance.now()) continue;
+    const tp = t.hits[0].getWorldPosition(new THREE.Vector3());
+    if (tp.y < 4 && Math.hypot(tp.x - tank.pos.x, tp.z - tank.pos.z) < TANK_R + 0.4) {
+      t.runOver = performance.now() + 1500;
+      t.blast(tank.pos, 40);
+      shatter(tp, 0xc8a878, 8, 3, 0.08, 0.8);
+      noise(0.2, 'lowpass', 500, 0.35);
+    }
+  }
+  for (const w of tank.wheels) w.rotation.x -= tank.speed * dt / 0.36;   // tracks roll
+  tankGroup.position.copy(tank.pos);
+  tankGroup.rotation.y = tank.yaw;
+  // The turret and barrel follow where you aim
+  let aimYaw = player.yaw, aimPitch = player.pitch;
+  if (inVR && rightHand) {
+    rightHand.getWorldQuaternion(tmpQuat);
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(tmpQuat);
+    aimYaw = Math.atan2(-f.x, -f.z); aimPitch = Math.asin(THREE.MathUtils.clamp(f.y, -1, 1));
+  }
+  tank.turret.rotation.y = aimYaw - tank.yaw;
+  tank.barrelPivot.rotation.x = THREE.MathUtils.clamp(aimPitch + 0.12, -0.15, 0.5);
+  // Cannon
+  tank.cool -= dt;
+  tank.kick = Math.max(0, tank.kick - dt * 4);
+  tank.barrel.position.z = -1.3 + tank.kick * 0.35;
+  if (firing && tank.cool <= 0) fireCannon();
+  engineSound(true, tank.speed);
+  // Keep "you" with the tank (so explosions, the camera and VR all follow it)
+  player.pos.set(tank.pos.x, 0, tank.pos.z);
+  if (inVR) rig.rotation.y += tank.yaw - yawBefore;   // riding on top: turn with the tank
 }
 
 // ---------- Main loop ----------
@@ -1201,6 +1507,18 @@ renderer.setAnimationLoop(() => {
     player.yaw = Math.sin(t * 0.15) * 0.5; player.pitch = -0.05;
   } else if (!paused) {
     cooldown -= dt;
+    if (tank.inside) {
+      updateTank(dt, inVR);
+      if (!inVR) {   // arrow keys and edge turning still aim the turret
+        if (keys.ArrowLeft) player.yaw += 2.2 * dt;
+        if (keys.ArrowRight) player.yaw -= 2.2 * dt;
+        if (freeLook && mouseX !== null) {
+          const edge = innerWidth * 0.08;
+          if (mouseX < edge) player.yaw += EDGE_TURN_SPEED * dt * (1 - mouseX / edge);
+          else if (mouseX > innerWidth - edge) player.yaw -= EDGE_TURN_SPEED * dt * (1 - (innerWidth - mouseX) / edge);
+        }
+      }
+    } else {
     // Movement
     let fx = 0, sx = 0, jump = false;
     if (inVR) ({ fx, sx, jump } = vr);
@@ -1267,13 +1585,16 @@ renderer.setAnimationLoop(() => {
     for (const p of pickups) p.glow.material.opacity = (p === nearPickup || p === vrPointedPickup) ? 0.9 : 0.35;
     const prompt = $('prompt');
     if (nearPickup && !inVR && !zoomed) { prompt.hidden = false; prompt.textContent = (owned[nearPickup.index] ? 'PRESS E TO HOLD ' : 'PRESS E TO PICK UP ') + nearPickup.w.name; }
+    else if (nearTank() && !zoomed) { prompt.hidden = inVR; prompt.textContent = 'PRESS E TO DRIVE THE TANK'; }
     else prompt.hidden = true;
 
     tryFire(dt);
+    }
     missileCooldown -= dt;
     if ((missileHeld || rightMissiles) && missileCooldown <= 0) { launchMissile(); missileCooldown = MISSILE_DELAY; }
     updateProjectiles(dt);
   } else { updateLaser(dt, false); }
+  updateFlames(dt);
 
   // Gun recoil and muzzle flash
   for (const g of heldGuns) {
@@ -1288,7 +1609,16 @@ renderer.setAnimationLoop(() => {
 
   // Camera
   rig.position.copy(player.pos);
-  if (!inVR) {
+  if (tank.inside && inVR) rig.position.y = 2.1;   // VR: riding on top of the tank
+  if (tank.inside && !inVR) {
+    // Behind-the-tank camera that follows your aim
+    tank.shake = Math.max(0, tank.shake - dt);
+    camera.position.set(Math.sin(player.yaw) * 7.5 + (Math.random() - 0.5) * tank.shake, 4.2 + (Math.random() - 0.5) * tank.shake, Math.cos(player.yaw) * 7.5);
+    camera.rotation.set(player.pitch - 0.2, player.yaw, 0);
+    pcHand.visible = false;
+    $('scope').hidden = true;
+    if (Math.abs(camera.fov - NORMAL_FOV) > 0.1) { camera.fov = NORMAL_FOV; camera.updateProjectionMatrix(); }
+  } else if (!inVR) {
     const bob = player.onGround ? Math.sin(player.walkPhase * 2) * 0.035 * Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 4) : 0;
     camera.position.set(0, EYE + bob, 0);
     camera.rotation.set(player.pitch, player.yaw, 0);

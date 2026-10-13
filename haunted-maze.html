@@ -295,11 +295,22 @@ function buildMaze() {
   for (const y of [0.4, 1.5, 2.6]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 2), iron); b.position.y = y; gateMesh.add(b); }
   gateMesh.position.set(gateCell.x * CELL + 0.5, 0, gateCell.z * CELL + 1);
   mazeGroup.add(gateMesh);
-  // Pale moonlight outside the exit
+  // Pale moonlight outside the exit, right where the side walls end (no gap)
+  const exitX0 = G * CELL, exitZ = gateCell.z * CELL + 1;
   const outside = new THREE.Mesh(new THREE.PlaneGeometry(2, WALL_H), new THREE.MeshBasicMaterial({ color: 0xb8d8ff, fog: false }));
-  outside.position.set(G * CELL + 0.6, WALL_H / 2, gateCell.z * CELL + 1);
+  outside.position.set(exitX0 - 0.02, WALL_H / 2, exitZ);
   outside.rotation.y = -Math.PI / 2;
   mazeGroup.add(outside);
+  // Stone frame around the exit doorway
+  const frameMat = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.95 });
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, WALL_H, 0.3), frameMat);
+    post.position.set(exitX0 - 0.15, WALL_H / 2, exitZ + side * 0.95);
+    mazeGroup.add(post);
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 2.2), frameMat);
+  lintel.position.set(exitX0 - 0.15, WALL_H - 0.15, exitZ);
+  mazeGroup.add(lintel);
   exitLight = new THREE.PointLight(0x9ac8ff, 6, 8, 1.5);
   exitLight.position.set(G * CELL - 0.5, 1.6, gateCell.z * CELL + 1);
   mazeGroup.add(exitLight);
