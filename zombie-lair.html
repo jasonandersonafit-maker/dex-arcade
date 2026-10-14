@@ -81,6 +81,16 @@
 <script type="module">
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { createMultiplayer } from './multiplayer.js';
+
+// ---------- Co-op (playing with a friend) ----------
+// The host's game runs the zombies; the guest's game shows the same zombies and sends its shots to the host.
+let coop = false;
+let mp = null;   // the multiplayer menu/connection, set up further down
+const isHost = () => coop && mp?.role === 'host';
+const isGuest = () => coop && mp?.role === 'guest';
+// Co-op is harder: more zombies per level and at once, faster zombies, tougher bosses, bigger King waves
+const COOP_KILLS = 1.6, COOP_EXTRA_ALIVE = 3, COOP_SPAWN_FASTER = 0.7, COOP_SPEED = 1.15, COOP_BOSS_HP = 1.8, COOP_WAVES = 1.5;
 
 // ---------- Settings you can tweak ----------
 const ZOMBIE_HP = 3;            // body shots needed to kill a zombie
@@ -93,7 +103,7 @@ const MISSILE_BOSS_DAMAGE = 20; // how much health one missile takes off a boss
 const LEVEL_BREAK = 3;          // seconds of rest between levels
 const KILLS_PER_LEVEL = 6;      // zombies to stop before you level up
 function isBossLevel(lvl) { return lvl % 5 === 0; }   // levels 5, 10, 15... are boss fights
-function levelGoal(lvl) { return isBossLevel(lvl) ? 1 : KILLS_PER_LEVEL; }
+function levelGoal(lvl) { return isBossLevel(lvl) ? 1 : Math.round(KILLS_PER_LEVEL * (coop ? COOP_KILLS : 1)); }
 const FINAL_LEVEL = 15;         // beat the boss on this level to win the game
 function bossKind(lvl) { return lvl === FINAL_LEVEL ? 'king' : (lvl / 5) % 2 === 1 ? 'brute' : 'imp'; }   // 5: Brute, 10: Imp, 15: King
 const BOSS_NAMES = { brute: 'THE BRUTE', imp: 'THE IMP', king: 'THE ZOMBIE KING' };
@@ -599,6 +609,7 @@ banner.position.set(0, 3, -9.7);
 scene.add(banner);
 let bannerT = 0;
 function showBanner(title, sub, color = '#7dff6b') {
+  if (isHost()) mp.send({ t: 'bn', a: [title, sub, color] });
   const g = bannerCanvas.getContext('2d');
   g.clearRect(0, 0, 1024, 256);
   // Dark backing so the words are readable on any sky
@@ -761,6 +772,7 @@ const shirtColors = [0x5a6b3a, 0x6b3a3a, 0x3a4f6b, 0x6b5a3a, 0x4a3a6b];
 const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2020 });
 const mouthMat = new THREE.MeshBasicMaterial({ color: 0x1a0505 });
 
+let nextId = 1;   // every zombie and person gets a number, so both co-op games know which one is which
 function makeZombie(look = {}) {
   const z = new THREE.Group();
   z.rotation.order = 'YXZ';
@@ -809,11 +821,12 @@ function makeZombie(look = {}) {
   }
 
   z.userData = {
+    id: nextId++,
     legs, arms, torso, headPivot, parts, mats: [skin, shirt, pants],
     hp: ZOMBIE_HP, dead: false, deadT: 0, hitT: 0,
     phase: Math.random() * 10,
     // Everything below gets a little tougher each level (gently, so it ramps up slowly)
-    speed: (0.5 + Math.random() * 0.4) * (1 + 0.08 * (level - 1)),    // walking speed
+    speed: (0.5 + Math.random() * 0.4) * (1 + 0.08 * (level - 1)) * (coop ? COOP_SPEED : 1),    // walking speed
     track: 0.35 * (1 + 0.15 * (level - 1)),                            // how fast they follow you sideways
     weaveAmp: Math.min(1.8, 0.2 * (level - 1)) * (0.6 + Math.random() * 0.8),    // side-to-side dodging (none on level 1)
     weaveFreq: 1 + level * 0.12 + Math.random() * 0.5,
@@ -835,6 +848,7 @@ function spawnZombie() {
   explode(z.position.clone().setY(0.1), 0x4a3526, 16, 3, 0.08);   // dirt bursts up
   zombies.push(z);
   if (Math.random() < 0.5) groan();
+  if (isHost()) mp.send({ t: 'sp', k: 'z', id: z.userData.id, p: [z.position.x, z.position.y, z.position.z], shirt: z.userData.mats[1].color.getHex() });
 }
 
 // ---------- Bosses ----------
@@ -850,7 +864,7 @@ function updateKingWaves(dt) {
   // Minions waiting to climb out of the ground come out one at a time
   if (waveQueue > 0) {
     waveTimer -= dt;
-    if (waveTimer <= 0) { spawnZombie(); waveQueue--; waveTimer = 0.5; }
+    if (waveTimer <= 0) { spawnZombie(); waveQueue--; waveTimer = coop ? 0.35 : 0.5; }
     return;
   }
   if (u.summoning) {
@@ -860,7 +874,7 @@ function updateKingWaves(dt) {
     if (waveTimer > 0) return;
     if (kingWave < KING_WAVES.length) {
       kingWave++;
-      waveQueue = KING_WAVES[kingWave - 1]; waveTimer = 0.3;
+      waveQueue = Math.round(KING_WAVES[kingWave - 1] * (coop ? COOP_WAVES : 1)); waveTimer = 0.3;
       showBanner(`WAVE ${kingWave}/${KING_WAVES.length}`, 'the King summons his army!', '#b07dff');
       kingRoar();
     } else {
@@ -878,7 +892,7 @@ function updateKingWaves(dt) {
     for (const [frac, key] of [[0.5, 'helpHalf'], [0.25, 'helpQuarter']]) {
       if (!u[key] && u.hp <= u.maxHp * frac) {
         u[key] = true;
-        waveQueue = 4; waveTimer = 0.2;
+        waveQueue = coop ? 6 : 4; waveTimer = 0.2;
         showBanner('THE KING CALLS FOR HELP!', 'more minions are coming', '#b07dff');
         kingRoar();
       }
@@ -968,6 +982,7 @@ function spawnBoss() {
     u.headMult = 3;                          // tiny head, so headshots are rewarded
     u.shootEvery = Math.max(0.6, 1.6 - 0.25 * (tier - 2));
   }
+  if (coop) u.maxHp = Math.round(u.maxHp * COOP_BOSS_HP);   // two players: tougher boss
   u.hp = u.maxHp;
   u.shootT = 2.5;
   z.scale.setScalar(u.size);
@@ -989,6 +1004,8 @@ function spawnBoss() {
   zombies.push(z);
   groan(); groan();
   drawBoard();
+  if (isHost()) mp.send({ t: 'sp', k: 'boss', id: u.id });
+  return z;
 }
 
 function updateBossBar(z) {
@@ -1006,10 +1023,20 @@ const shotHitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, 
 const boulderGeo = new THREE.DodecahedronGeometry(0.3, 0);
 const boulderHitGeo = new THREE.SphereGeometry(0.45, 8, 6);
 const boulderMat = new THREE.MeshStandardMaterial({ color: 0x6f6890, flatShading: true, roughness: 1 });
+let nextShotId = 1;
 function fireEnemyShot(z) {
   const boulder = z.userData.shotKind === 'boulder' || (z.userData.shotKind === 'mixed' && Math.random() < 0.5);
   const from = chest(z).add(new THREE.Vector3(0, boulder ? 0.8 * z.userData.size : 0, 0.3 * z.userData.size));
-  camera.getWorldPosition(tmpPos);
+  // In co-op it aims at either player
+  if (coop && friendSeen && Math.random() < 0.5) tmpPos.copy(friendHeadPos);
+  else camera.getWorldPosition(tmpPos);
+  const vel = tmpPos.clone().sub(from).normalize().multiplyScalar((boulder ? 7 : 6) + level * 0.1);
+  const s = makeEnemyShot(boulder, from, vel, nextShotId++);
+  if (isHost()) mp.send({ t: 'es', id: s.userData.id, b: boulder ? 1 : 0, f: from.toArray(), v: vel.toArray() });
+  if (boulder) { noise(0.3, 'lowpass', 300, 0.4); z.userData.throwT = 0.35; }
+  else beep(700, 0.18, 'sine', 0.1);
+}
+function makeEnemyShot(boulder, from, vel, id) {
   const s = new THREE.Group();
   if (boulder) {
     // The Brute hurls a chunk of tombstone. Takes 3 hits to shoot down.
@@ -1026,17 +1053,18 @@ function fireEnemyShot(z) {
   s.add(hit);
   s.userData.hit = hit;
   s.userData.boulder = boulder;
+  s.userData.id = id;
   s.position.copy(from);
-  s.userData.vel = tmpPos.clone().sub(from).normalize().multiplyScalar((boulder ? 7 : 6) + level * 0.1);
+  s.userData.vel = vel;
   scene.add(s);
   enemyShots.push(s);
-  if (boulder) { noise(0.3, 'lowpass', 300, 0.4); z.userData.throwT = 0.35; }
-  else beep(700, 0.18, 'sine', 0.1);
+  return s;
 }
-function destroyShot(s, burst = true) {
+function destroyShot(s, burst = true, fromNet = false) {
   const i = enemyShots.indexOf(s);
   if (i < 0) return;
   enemyShots.splice(i, 1);
+  if (coop && !fromNet && burst) mp.send({ t: 'esx', id: s.userData.id });   // shot down: gone for both players
   scene.remove(s);
   if (burst) explode(s.position, s.userData.boulder ? 0x6f6890 : 0xb8ff5a, s.userData.boulder ? 18 : 10, 3, s.userData.boulder ? 0.09 : 0.05);
 }
@@ -1070,16 +1098,19 @@ const helpTex = canvasTexture(256, 128, (g) => {
 });
 let personTimer = 4;
 
-function spawnPerson() {
-  const look = PEOPLE_LOOKS[Math.floor(Math.random() * PEOPLE_LOOKS.length)];
+function spawnPerson(net = null) {
+  const li = net ? net.li : Math.floor(Math.random() * PEOPLE_LOOKS.length);
+  const look = PEOPLE_LOOKS[li];
   const p = makeZombie({ ...look, eyes: 0x111111, human: true });
   const u = p.userData;
   u.person = true;
   u.rising = false;
-  const fromLeft = Math.random() < 0.5;
+  const fromLeft = net ? net.dir > 0 : Math.random() < 0.5;
   u.dir = fromLeft ? 1 : -1;
-  u.speed = 2 + Math.random() * 1.2;
-  p.position.set(fromLeft ? -12 : 12, 0, -2.8 - Math.random() * 5);
+  u.speed = net ? net.sp : 2 + Math.random() * 1.2;
+  p.position.set(fromLeft ? -12 : 12, 0, net ? net.z : -2.8 - Math.random() * 5);
+  if (net) u.id = net.id;
+  else if (isHost()) mp.send({ t: 'sp', k: 'p', id: u.id, li, dir: u.dir, sp: u.speed, z: p.position.z });
   p.rotation.y = u.dir * Math.PI / 2;   // face the way they're running
   const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: helpTex, transparent: true }));
   bubble.scale.set(0.8, 0.4, 1);
@@ -1094,7 +1125,7 @@ function spawnPerson() {
 
 function personHit(p) {
   const u = p.userData;
-  if (u.dead) return;
+  if (u.dead || isGuest()) return;   // the host's game decides
   u.dead = true;
   u.bubble.visible = false;
   explode(p.position.clone().setY(1.2), 0xffffff, 16, 4, 0.06);
@@ -1136,6 +1167,11 @@ function updatePeople(dt) {
 
 function damageZombie(z, dmg, point) {
   const u = z.userData;
+  if (isGuest()) {   // tell the host's game; it decides if the zombie dies
+    mp.send({ t: 'hit', id: u.id, d: dmg });
+    if (!u.person && !u.dead) { explode(point, u.summoning ? 0xb07dff : 0x4f9a2a, 10, 4, 0.05); u.hitT = 0.1; }
+    return;
+  }
   if (u.person) { personHit(z); return; }
   if (u.dead) return;
   if (u.summoning) {   // the King's shield: shots just spark off
@@ -1154,6 +1190,7 @@ function damageZombie(z, dmg, point) {
 
 function killZombie(z) {
   if (z.userData.dead) return;
+  if (isGuest()) { mp.send({ t: 'hit', id: z.userData.id, d: 999, kill: 1 }); return; }
   z.userData.dead = true;
   kills++;
   if (!isBossLevel(level) || z.userData.boss) levelKills++;   // on boss levels only the boss counts
@@ -1186,6 +1223,7 @@ const flameMats = [0xff6a10, 0xffb020, 0xff3a10, 0xffe060].map(color =>
   new THREE.SpriteMaterial({ map: glowTex, color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
 
 function startVictory() {
+  if (isHost()) mp.send({ t: 'victory' });
   victory = true; victoryT = 0; victoryDone = false;
   showBanner(BOSS_NAMES.king + ' IS DEFEATED!', 'the sun is rising...', '#ffd23d');
   [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => beep(f, 0.3, 'triangle', 0.15), i * 150));
@@ -1322,16 +1360,19 @@ const hurtSphere = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12),
 hurtSphere.renderOrder = 999;
 camera.add(hurtSphere);
 
-function playerHit(amount = 1) {
+function playerHit(amount = 1, fromFriend = false) {
   if (gameOver || victory) return;
   if (invincible) {   // secret code 7655: nothing can hurt you
     beep(1200, 0.08, 'sine', 0.08);
     return;
   }
+  if (!fromFriend) {
+    hurtSphere.material.opacity = 0.5;
+    beep(90, 0.5, 'square', 0.25);
+    for (const c of controllers) c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(1, 300);
+  }
+  if (isGuest()) { mp.send({ t: 'hurt', n: amount }); return; }   // co-op: you share the host's hearts
   lives = Math.max(0, lives - amount);
-  hurtSphere.material.opacity = 0.5;
-  beep(90, 0.5, 'square', 0.25);
-  for (const c of controllers) c.userData.input?.gamepad?.hapticActuators?.[0]?.pulse?.(1, 300);
   if (lives <= 0) { gameOver = true; gameOverAt = clock.elapsedTime; }
   drawBoard();
 }
@@ -1348,10 +1389,13 @@ function restart() {
   level = 1; levelKills = 0; levelBreak = 0; bossSpawned = false;
   kingBoss = null; kingWave = 0; waveQueue = 0;
   setWeapon(WEAPONS[0]);
-  rig.position.set(0, 0, 0); rig.rotation.set(0, 0, 0);   // back to the start, facing the gate
+  rig.position.set(coopSpotX(), 0, 0); rig.rotation.set(0, 0, 0);   // back to the start, facing the gate
+  if (isHost()) mp.send({ t: 'restart' });
   showBanner('LEVEL 1', 'stop ' + levelGoal(1) + ' zombies');
   drawBoard();
 }
+// In co-op the host stands a little to the left and the guest a little to the right
+function coopSpotX() { return !coop ? 0 : isHost() ? -1.3 : 1.3; }
 
 // ---------- Pause ----------
 let paused = false;
@@ -1401,7 +1445,7 @@ for (let n = 1; n <= FINAL_LEVEL; n++) {
   document.getElementById('levelGrid').appendChild(b);
 }
 function openLevelPick() {
-  if (renderer.xr.isPresenting) return;
+  if (renderer.xr.isPresenting || isGuest() || inMenu) return;   // in co-op only the host can pick the level
   setPaused(true);
   document.getElementById('pauseMenu').hidden = true;   // show the level picker instead of the pause menu
   levelPick.hidden = false;
@@ -1469,8 +1513,10 @@ const tmpPos = new THREE.Vector3(), tmpQuat = new THREE.Quaternion(), tmpDir = n
 // Fires the current gun along a ray. Hits are instant, like a real gun.
 function fireGun(gun, rayOrigin, rayDir) {
   if (paused) return;
-  if (gameOver) { if (clock.elapsedTime - gameOverAt > 1.5) restart(); return; }
-  if (victoryDone && clock.elapsedTime - victoryDoneAt > 2) { restart(); return; }
+  // Shooting after GAME OVER / the win plays again (in co-op the guest asks the host to restart)
+  const again = () => isGuest() ? mp.send({ t: 'again' }) : restart();
+  if (gameOver) { if (clock.elapsedTime - gameOverAt > 1.5) again(); return; }
+  if (victoryDone && clock.elapsedTime - victoryDoneAt > 2) { again(); return; }
   const w = weapon;
   rayDir.normalize();
   gun.userData.muzzle.getWorldPosition(tmpPos);
@@ -1509,7 +1555,9 @@ function fireGun(gun, rayOrigin, rayDir) {
       end = hit.point;
       if (!w.pierce) break;   // the plasma rifle keeps going through everything
     }
-    tracer(muzzlePos, end ?? rayOrigin.clone().addScaledVector(dir, 40), w.tracer);
+    const to = end ?? rayOrigin.clone().addScaledVector(dir, 40);
+    tracer(muzzlePos, to, w.tracer);
+    if (coop && p === 0) mp.send({ t: 'tr', a: [...muzzlePos.toArray(), ...to.toArray()], c: w.tracer ?? null });   // your friend sees your shots
   }
   gun.userData.kick = w.pellets > 1 ? 1.6 : 1;
   gun.userData.flashT = 0.04;
@@ -1562,9 +1610,24 @@ function fireMissile(origin, direction) {
   scene.add(m);
   missiles.push(m);
   beep(140, 0.5, 'sawtooth', 0.08);
+  if (coop) mp.send({ t: 'ms', p: m.position.toArray(), v: m.userData.vel.toArray() });
+}
+// Your friend's missile: just for show, their game does the exploding
+function friendMissile(p, v) {
+  const m = makeMissile();
+  m.position.fromArray(p);
+  m.userData.vel = new THREE.Vector3().fromArray(v);
+  m.userData.life = 4;
+  m.userData.remote = true;
+  m.lookAt(m.position.clone().add(m.userData.vel));
+  scene.add(m);
+  missiles.push(m);
 }
 
-function boom(pos) {
+function boom(pos, remote = false) {
+  // Co-op: the host's game does the damage. The guest's own missiles ask the host to explode them.
+  if (!remote && isGuest()) mp.send({ t: 'gboom', p: pos.toArray() });
+  if (!remote && isHost()) mp.send({ t: 'boom', p: pos.toArray() });
   const ball = new THREE.Mesh(blastGeo, new THREE.MeshBasicMaterial({ color: 0xff8a1f, transparent: true, opacity: 0.9 }));
   ball.position.copy(pos);
   ball.scale.setScalar(0.2);
@@ -1578,6 +1641,7 @@ function boom(pos) {
   explode(pos, 0xffb030);
   explode(pos, 0xff4020);
   noise(0.8, 'lowpass', 600, 0.6);
+  if (isGuest()) return;   // only the host's game hurts things
   // Damage everything close to the explosion
   for (const z of zombies) {
     if (!z.userData.dead && chest(z).distanceTo(pos) < BLAST_RADIUS + (z.userData.size - 1)) {
@@ -1609,7 +1673,7 @@ function updateMissiles(dt) {
       || people.some(p => !p.userData.dead && chest(p).distanceTo(m.position) < 0.6);   // missiles blow up on people too, not fly through them
     const hitWorld = m.position.z < -9.9 || m.position.y < 0.05 || m.userData.life <= 0;
     if (hitZombie || hitWorld) {
-      boom(m.position);
+      if (!m.userData.remote) boom(m.position);   // a friend's missile: their game sends the explosion
       scene.remove(m);
       missiles.splice(i, 1);
     }
@@ -1639,7 +1703,10 @@ for (let i = 0; i < 2; i++) {
   controller.addEventListener('connected', e => { controller.userData.input = e.data; });
   controller.addEventListener('disconnected', () => { controller.userData.input = null; });
   // Holding the trigger keeps firing; the game loop does the repeat shots
-  controller.addEventListener('selectstart', () => { controller.userData.firing = true; controller.userData.cooldown = 0; });
+  controller.addEventListener('selectstart', () => {
+    if (mp.select(controller) || inMenu) return;   // pointing at the multiplayer menu
+    controller.userData.firing = true; controller.userData.cooldown = 0;
+  });
   controller.addEventListener('selectend', () => { controller.userData.firing = false; });
   // Grip: reach over your shoulder to grab the RPG; let go to put it back
   controller.addEventListener('squeezestart', () => { if (!rpgHand && !paused && !gameOver && nearBack(controller)) grabRPG(controller); });
@@ -1738,7 +1805,7 @@ let mouseFiring = false, mouseCooldown = 0;
 function aimAt(e) { mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); }
 renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());   // no right-click menu in the game
 renderer.domElement.addEventListener('mousedown', e => {
-  if (renderer.xr.isPresenting || paused) return;
+  if (renderer.xr.isPresenting || paused || inMenu) return;
   document.getElementById('hud').hidden = true;   // hide the instructions once you start playing
   aimAt(e);
   if (e.button === 2) { missileHeld = true; return; }   // hold right click for full-auto missiles
@@ -1791,7 +1858,7 @@ function updateZombies(dt) {
     if (levelBreak <= 0) { startNextLevel(); spawnTimer = isBossLevel(level) ? 2.5 : 1; }
   }
   const alive = zombies.filter(z => !z.userData.dead).length;
-  const maxAlive = Math.min(10, 2 + Math.floor(level / 2));    // one more zombie at once every 2 levels
+  const maxAlive = Math.min(10, 2 + Math.floor(level / 2)) + (coop ? COOP_EXTRA_ALIVE : 0);    // one more zombie at once every 2 levels
   // Don't spawn more than are still needed to finish the level
   const stillNeeded = levelGoal(level) - levelKills;
   spawnTimer -= dt;
@@ -1801,7 +1868,7 @@ function updateZombies(dt) {
     updateKingWaves(dt);   // the Zombie King's minion waves
   } else if (!gameOver && !victory && levelBreak <= 0 && alive < Math.min(maxAlive, stillNeeded) && spawnTimer <= 0) {
     spawnZombie();
-    spawnTimer = Math.max(0.6, 1.6 - level * 0.05) + Math.random();
+    spawnTimer = (Math.max(0.6, 1.6 - level * 0.05) + Math.random()) * (coop ? COOP_SPAWN_FASTER : 1);
   }
 
   for (let i = zombies.length - 1; i >= 0; i--) {
@@ -1841,7 +1908,9 @@ function updateZombies(dt) {
     }
 
     // Shamble toward the player, drifting sideways to follow you
-    const dx = you.x - z.position.x;
+    // Go after whichever player is closer (in co-op)
+    const targetX = coop && friendSeen && Math.abs(friendHeadPos.x - z.position.x) < Math.abs(you.x - z.position.x) ? friendHeadPos.x : you.x;
+    const dx = targetX - z.position.x;
     z.position.x += Math.sign(dx) * Math.min(Math.abs(dx), u.track * dt);
     // Weave side to side to dodge your shots (higher levels weave wider and quicker)
     u.weavePhase += dt * u.weaveFreq;
@@ -1909,6 +1978,234 @@ function updateZombies(dt) {
   }
 }
 
+// ---------- Co-op: your friend, and keeping both games in step ----------
+let inMenu = true;   // the play solo / host / join menu shows first
+let friendSeen = false;
+const friendHeadPos = new THREE.Vector3();
+// Your friend: a head with a visor, and a gun in each hand
+const friendAvatar = new THREE.Group();
+friendAvatar.visible = false;
+scene.add(friendAvatar);
+const avHead = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.28, 0.26), new THREE.MeshStandardMaterial({ color: 0x33a0ff, flatShading: true }));
+const avVisor = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.02), new THREE.MeshBasicMaterial({ color: 0x7dff6b }));
+avVisor.position.set(0, 0.03, -0.14); avHead.add(avVisor);
+const avBody = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.22), new THREE.MeshStandardMaterial({ color: 0x2a4a7a, flatShading: true }));
+friendAvatar.add(avHead, avBody);
+const avHands = [0, 1].map(() => {
+  const h = new THREE.Group();
+  const gunMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, metalness: 0.6, roughness: 0.4 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.28), gunMat); body.position.z = -0.08; h.add(body);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.06), gunMat); grip.position.set(0, -0.09, 0.02); h.add(grip);
+  friendAvatar.add(h);
+  return h;
+});
+const avTargets = { head: [0, 1.6, 0, 0, 0, 0, 1], hands: [null, null] };
+const tmpQ2 = new THREE.Quaternion();
+function updateFriendAvatar(dt) {
+  if (!coop || !friendSeen) { friendAvatar.visible = false; return; }
+  friendAvatar.visible = true;
+  const k = Math.min(1, dt * 15);
+  const h = avTargets.head;
+  avHead.position.lerp(tmpPos.set(h[0], h[1], h[2]), k);
+  avHead.quaternion.slerp(tmpQ2.set(h[3], h[4], h[5], h[6]), k);
+  avBody.position.set(avHead.position.x, avHead.position.y - 0.55, avHead.position.z + 0.05);
+  friendHeadPos.copy(avHead.position);
+  avTargets.hands.forEach((t, i) => {
+    avHands[i].visible = !!t;
+    if (!t) return;
+    avHands[i].position.lerp(tmpPos.set(t[0], t[1], t[2]), k);
+    avHands[i].quaternion.slerp(tmpQ2.set(t[3], t[4], t[5], t[6]), k);
+  });
+}
+const pose = (obj) => { obj.getWorldPosition(tmpPos); obj.getWorldQuaternion(tmpQuat); return [...tmpPos.toArray(), ...tmpQuat.toArray()].map(v => Math.round(v * 1000) / 1000); };
+
+// Sending: your head and hands to your friend; the host also sends the zombies and the score
+let avT = 0, zpT = 0, gsT = 0;
+function netTick(dt) {
+  if (!coop || !mp.connected) return;
+  avT -= dt;
+  if (avT <= 0) {
+    avT = 1 / 15;
+    const hands = renderer.xr.isPresenting ? controllers.map(c => c.userData.input ? pose(c) : null) : [pose(pcGun), null];
+    mp.send({ t: 'av', h: pose(camera), hands });
+  }
+  if (!isHost()) return;
+  for (const e of [...zombies, ...people]) if (e.userData.dead && !e.userData.netDead) { e.userData.netDead = true; mp.send({ t: 'die', id: e.userData.id }); }
+  zpT -= dt;
+  if (zpT <= 0) {
+    zpT = 1 / 12;
+    const r = (v) => Math.round(v * 100) / 100;
+    mp.send({ t: 'zp', a: [...zombies, ...people].filter(e => !e.userData.dead).map(e => {
+      const u = e.userData;
+      return [u.id, r(e.position.x), r(e.position.y), r(e.position.z), r(e.rotation.y), r(u.phase), u.hitT > 0 ? 1 : 0,
+        u.boss ? Math.max(0, Math.round(u.hp)) : 0, u.summoning ? 1 : 0, u.throwT > 0 ? 1 : 0, u.rising ? 1 : 0];
+    }) });
+  }
+  gsT -= dt;
+  if (gsT <= 0) { gsT = 0.25; mp.send({ t: 'gs', lives, kills, level, lk: levelKills, go: gameOver ? 1 : 0, vic: victory ? 1 : 0 }); }
+}
+
+const findEntity = (id) => zombies.find(z => z.userData.id === id) || people.find(p => p.userData.id === id);
+function onNet(msg) {
+  switch (msg.t) {
+    case 'av':
+      avTargets.head = msg.h; avTargets.hands = msg.hands || [null, null];
+      if (!friendSeen) { friendSeen = true; avHead.position.fromArray(msg.h); }
+      break;
+    case 'tr': {
+      const a = msg.a;
+      tracer(new THREE.Vector3(a[0], a[1], a[2]), new THREE.Vector3(a[3], a[4], a[5]), msg.c ?? undefined);
+      gunshotSound(weapon);
+      break;
+    }
+    case 'ms': friendMissile(msg.p, msg.v); break;
+    case 'boom': boom(new THREE.Vector3().fromArray(msg.p), true); break;
+    case 'esx': { const s = enemyShots.find(s => s.userData.id === msg.id); if (s) destroyShot(s, true, true); break; }
+    // ----- messages the host's game gets from the guest -----
+    case 'hit': {
+      if (!isHost()) break;
+      const e = findEntity(msg.id);
+      if (!e || e.userData.dead) break;
+      if (e.userData.person) personHit(e);
+      else if (msg.kill) { if (e.userData.boss) damageZombie(e, MISSILE_BOSS_DAMAGE, chest(e)); else killZombie(e); }
+      else damageZombie(e, msg.d, chest(e));
+      break;
+    }
+    case 'hurt': if (isHost()) playerHit(msg.n, true); break;
+    case 'gboom': if (isHost()) boom(new THREE.Vector3().fromArray(msg.p), true); break;
+    case 'again': if (isHost() && (gameOver || victoryDone)) restart(); break;
+    // ----- messages the guest's game gets from the host -----
+    case 'sp': {
+      if (!isGuest()) break;
+      if (msg.k === 'z') {
+        const z = makeZombie({ shirt: msg.shirt });
+        z.userData.id = msg.id;
+        z.position.fromArray(msg.p);
+        scene.add(z); zombies.push(z);
+        explode(z.position.clone().setY(0.1), 0x4a3526, 16, 3, 0.08);
+        if (Math.random() < 0.5) groan();
+      } else if (msg.k === 'boss') {
+        const z = spawnBoss();
+        z.userData.id = msg.id;
+      } else if (msg.k === 'p') spawnPerson(msg);
+      break;
+    }
+    case 'zp': {
+      if (!isGuest()) break;
+      const now = clock.elapsedTime;
+      for (const d of msg.a) { const e = findEntity(d[0]); if (e) { e.userData.net = d; e.userData.netSeen = now; } }
+      break;
+    }
+    case 'die': {
+      if (!isGuest()) break;
+      const e = findEntity(msg.id);
+      if (!e || e.userData.dead) break;
+      const u = e.userData;
+      u.dead = true; u.deadT = 0;
+      if (u.person) { u.bubble.visible = false; explode(e.position.clone().setY(1.2), 0xffffff, 16, 4, 0.06); }
+      else {
+        noise(0.3, 'lowpass', 400, 0.4);
+        if (u.boss) { u.bar.visible = false; explode(chest(e), 0x4f9a2a, 60, 10, 0.1); explode(chest(e), 0xffb030, 40, 8, 0.08); noise(1.2, 'lowpass', 300, 0.8); }
+      }
+      break;
+    }
+    case 'es': if (isGuest()) { makeEnemyShot(!!msg.b, new THREE.Vector3().fromArray(msg.f), new THREE.Vector3().fromArray(msg.v), msg.id); beep(msg.b ? 200 : 700, 0.18, 'sine', 0.1); } break;
+    case 'bn': if (isGuest()) showBanner(...msg.a); break;
+    case 'victory': if (isGuest()) startVictory(); break;
+    case 'restart': if (isGuest()) guestReset(); break;
+    case 'gs': {
+      if (!isGuest()) break;
+      const changed = lives !== msg.lives || kills !== msg.kills || level !== msg.level || levelKills !== msg.lk || gameOver !== !!msg.go;
+      if (level !== msg.level) { level = msg.level; const w = weaponForLevel(level); if (w !== weapon) setWeapon(w); }
+      if (!gameOver && msg.go) gameOverAt = clock.elapsedTime;
+      lives = msg.lives; kills = msg.kills; levelKills = msg.lk; gameOver = !!msg.go;
+      if (changed) drawBoard();
+      break;
+    }
+  }
+}
+// The guest's copies of the zombies glide to where the host's game says they are, and walk the same way
+function updateReplicas(dt) {
+  const now = clock.elapsedTime, k = Math.min(1, dt * 10);
+  for (const list of [zombies, people]) for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i], u = e.userData;
+    u.hitT -= dt;
+    for (const m of u.mats) m.emissive.setHex(u.hitT > 0 ? 0x664444 : 0x000000);
+    if (u.dead) {
+      u.deadT += dt;
+      e.rotation.x = -Math.min(1, u.deadT / 0.5) * Math.PI / 2;
+      if (u.deadT < 1.5 && e.position.y > 0) e.position.y = Math.max(0, e.position.y - dt * 4);
+      if (u.deadT > 1.5) e.position.y -= dt * 0.6;
+      if (u.deadT > 2.5) { scene.remove(e); list.splice(i, 1); }
+      continue;
+    }
+    if (u.netSeen !== undefined && now - u.netSeen > 1) { scene.remove(e); list.splice(i, 1); continue; }   // the host's game is done with it
+    const d = u.net;
+    if (!d) continue;
+    e.position.x += (d[1] - e.position.x) * k;
+    e.position.y += (d[2] - e.position.y) * k;
+    e.position.z += (d[3] - e.position.z) * k;
+    let dy = d[4] - e.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    e.rotation.y += dy * k;
+    u.phase = d[5];
+    if (d[6]) u.hitT = 0.1;
+    if (u.boss) {
+      if (d[7]) { u.hp = d[7]; updateBossBar(e); }
+      if (u.shield) u.shield.visible = !!d[8];
+    }
+    const s = Math.sin(u.phase);
+    if (u.person) {
+      u.legs[0].rotation.x = s * 0.8; u.legs[1].rotation.x = -s * 0.8;
+      u.arms[0].rotation.x = Math.PI + Math.sin(u.phase * 1.5) * 0.4;
+      u.arms[1].rotation.x = Math.PI - Math.sin(u.phase * 1.5) * 0.4;
+    } else {
+      const air = e.position.y > 0.05 && !d[10];
+      u.legs[0].rotation.x = air ? -0.7 : s * 0.6;
+      u.legs[1].rotation.x = air ? 0.4 : -s * 0.6;
+      u.arms[0].rotation.x = -Math.PI / 2 + Math.sin(u.phase * 0.5) * 0.15;
+      u.arms[1].rotation.x = -Math.PI / 2 - Math.sin(u.phase * 0.5) * 0.15;
+      if (d[9] || d[8]) u.arms[0].rotation.x = u.arms[1].rotation.x = -Math.PI * 0.9;   // throwing / casting
+      u.headPivot.rotation.z = Math.sin(u.phase * 0.3) * 0.25;
+    }
+  }
+}
+// The guest starts fresh when the host (re)starts
+function guestReset() {
+  for (const z of zombies) scene.remove(z);
+  zombies.length = 0;
+  for (const p of people) scene.remove(p);
+  people.length = 0;
+  clearVictory();
+  for (const s of [...enemyShots]) destroyShot(s, false, true);
+  kills = 0; lives = START_LIVES; gameOver = false;
+  level = 1; levelKills = 0; levelBreak = 0;
+  setWeapon(WEAPONS[0]);
+  rig.position.set(coopSpotX(), 0, 0); rig.rotation.set(0, 0, 0);
+  drawBoard();
+}
+
+mp = createMultiplayer({
+  THREE, renderer, gameId: 'zombies', title: 'ZOMBIE LAIR', color: '#7dff6b', soloLabel: 'PLAY SOLO',
+  onSolo: () => { coop = false; inMenu = false; restart(); },
+  onStart: () => {
+    coop = true; inMenu = false;
+    if (mp.role === 'host') restart(); else guestReset();
+    showBanner('CO-OP!', 'zombies are tougher with two of you', '#33f0ff');
+  },
+  onMessage: onNet,
+  onLeft: () => {
+    // Keep playing alone if your friend leaves
+    const wasGuest = mp.role === 'guest';
+    coop = false; friendSeen = false; friendAvatar.visible = false;
+    if (wasGuest) restart();
+    showBanner('FRIEND LEFT', 'you\'re playing solo now', '#ff7a3d');
+  },
+  onArcade: () => goToArcade(),
+});
+mp.panel.position.set(0, 1.5, -1.6);
+rig.add(mp.panel);
+mp.open();
+
 // ---------- Game loop (runs every frame) ----------
 const clock = new THREE.Clock();
 const aimPoint = new THREE.Vector3();
@@ -1924,8 +2221,16 @@ renderer.setAnimationLoop(() => {
     // Y button while paused: back to the arcade
   }
   pauseSign.visible = paused && renderer.xr.isPresenting;
+  mp.updatePointer(controllers);
+  if (inMenu) {   // the play solo / host / join menu: the graveyard just sits there
+    pcGun.visible = !renderer.xr.isPresenting;
+    updateScenery(dt, clock.elapsedTime);
+    renderer.render(scene, camera);
+    return;
+  }
   if (paused) {   // everything freezes while paused
     hurtSphere.material.opacity = Math.max(0, hurtSphere.material.opacity - dt * 0.8);
+    netTick(dt);
     renderer.render(scene, camera);
     return;
   }
@@ -1975,11 +2280,13 @@ renderer.setAnimationLoop(() => {
     if (u.flash.visible) u.flash.scale.setScalar(0.7 + Math.random() * 0.8);
   }
 
-  updateZombies(dt);
-  updatePeople(dt);
+  if (isGuest()) updateReplicas(dt);   // co-op guest: the host's game runs the zombies
+  else { updateZombies(dt); updatePeople(dt); }
   if (victory) updateVictory(dt);
   if (!gameOver) updateEnemyShots(dt);
   updateMissiles(dt);
+  netTick(dt);
+  updateFriendAvatar(dt);
   updateScenery(dt, clock.elapsedTime);
 
   for (let i = sparks.length - 1; i >= 0; i--) {

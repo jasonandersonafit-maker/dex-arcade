@@ -66,7 +66,7 @@ export function createMultiplayer(opts) {
     if (mp.role !== 'guest') return;
     const peer = new Peer();
     mp.peer = peer;
-    peer.on('open', () => setup(peer.connect(peerId(code), { serialization: 'json' })));
+    peer.on('open', () => setup(peer.connect(peerId(code), { serialization: 'json', reliable: true })));   // reliable: no lost messages
     peer.on('error', (e) => {
       setStatus(e.type === 'peer-unavailable' ? 'No game with code ' + code + '. Check the code!' : 'Network problem (' + e.type + ')');
     });
