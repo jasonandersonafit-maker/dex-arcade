@@ -82,6 +82,7 @@
     <div id="results"></div>
     <div class="buttons">
       <button id="againBtn" class="mc" type="button">RACE AGAIN</button>
+      <button id="menuBtn" class="mc" type="button">MENU</button>
       <button id="endArcadeBtn" class="mc" type="button">BACK TO ARCADE</button>
     </div>
   </div>
@@ -96,6 +97,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { createMultiplayer } from './multiplayer.js';
 
 // ---------- Settings you can tweak ----------
 const LAPS = 3;
@@ -513,17 +515,33 @@ function makeKart(color, withDriver) {
 
 // Everyone in the race: you (index 0) and the bots. "s" is how far around the track (in samples) they are.
 const racers = [];
-const player = { name: 'YOU', isPlayer: true, mesh: makeKart(0x3d8bff, true), yaw: 0, speed: 0, steer: 0,
+const player = { name: 'YOU', isPlayer: true, color: 0x3d8bff, mesh: makeKart(0x3d8bff, true), yaw: 0, speed: 0, steer: 0,
   pos: new THREE.Vector3(), y: 0, vy: 0, lastG: 0, s: 0, idx: 0, lat: 0, boost: 0, driftT: 0, drifting: false,
   finished: false, finishTime: 0, lapStart: 0, bestLap: Infinity, lastLapShown: 0, wrongT: 0, airborne: false };
 racers.push(player);
 scene.add(player.mesh);
+const bots = [];
 BOT_SPEEDS.forEach((max, n) => {
-  const b = { name: BOT_NAMES[n], isPlayer: false, mesh: makeKart(BOT_COLORS[n], true), max, speed: 0, lane: 0, laneTarget: 0, laneT: 0,
-    y: 0, vy: 0, lastG: 0, s: 0, boost: 0, finished: false, finishTime: 0, yaw: 0 };
+  const b = { name: BOT_NAMES[n], isBot: true, color: BOT_COLORS[n], mesh: makeKart(BOT_COLORS[n], true), max, speed: 0, lane: 0, laneTarget: 0, laneT: 0,
+    y: 0, vy: 0, lastG: 0, s: 0, boost: 0, finished: false, finishTime: 0, yaw: 0, net: null };
   racers.push(b);
+  bots.push(b);
   scene.add(b.mesh);
 });
+// Your friend's kart in a multiplayer race (moved by messages from their headset)
+const friend = { name: 'FRIEND', isRemote: true, color: 0xffd23d, mesh: makeKart(0xffd23d, true), s: 0, y: 0, speed: 0, boost: 0, steer: 0,
+  finished: false, finishTime: 0, yaw: 0, target: new THREE.Vector3(), targetYaw: 0 };
+friend.mesh.visible = false;
+scene.add(friend.mesh);
+{
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, map: canvasTex(256, 64, (g) => {
+    g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(0, 0, 256, 64);
+    g.fillStyle = '#ffd23d'; g.font = '30px "Press Start 2P", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('FRIEND', 128, 34);
+  }, false) }));
+  tag.scale.set(1.6, 0.4, 1); tag.position.y = 2.2; friend.mesh.add(tag);
+}
+let multi = false;   // true while racing a friend
+const isGuest = () => multi && mp.role === 'guest';
 
 // ---------- Sound ----------
 let audio = null, master = null, engine = null;
@@ -593,8 +611,14 @@ const ordinal = (n) => n + (['TH', 'ST', 'ND', 'RD'][n] || 'TH');
 const fmt = (t) => { if (!isFinite(t)) return '-:--.--'; const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2); };
 
 function placeOnGrid() {
-  // Bots start in front, you start at the back of the grid
-  const order = [racers[1], racers[2], racers[3], player];
+  // Bots start in front, you start at the back of the grid (in a friend race: the host, then the guest)
+  const humans = !multi ? [player] : mp.role === 'host' ? [player, friend] : [friend, player];
+  const order = [...bots, ...humans];
+  // Only race against your friend while you're racing together
+  const fi = racers.indexOf(friend);
+  if (multi && fi < 0) racers.push(friend);
+  if (!multi && fi >= 0) racers.splice(fi, 1);
+  friend.mesh.visible = multi;
   order.forEach((r, slot) => {
     r.s = -6 - slot * 6;
     const lane = slot % 2 ? -3 : 3;
@@ -603,10 +627,13 @@ function placeOnGrid() {
       trackAt(r.s, r.pos, lane);
       r.idx = wrap(Math.round(r.s)); r.yaw = yawOf(T[r.idx]); r.steer = 0; r.driftT = 0; r.drifting = false;
       r.lapStart = 0; r.bestLap = Infinity; r.lastLapShown = 0; r.wrongT = 0;
-    } else { r.lane = lane; r.laneTarget = lane; r.laneT = 2 + Math.random() * 3; }
+    } else if (r.isRemote) {
+      trackAt(r.s, r.target, lane); r.mesh.position.copy(r.target);
+      r.yaw = r.targetYaw = yawOf(T[wrap(Math.round(r.s))]);
+    } else { r.lane = lane; r.laneTarget = lane; r.laneT = 2 + Math.random() * 3; r.net = null; }
   });
 }
-function startRace() {
+function beginRace() {
   placeOnGrid();
   state = 'countdown'; stateT = 0; raceT = 0; countLast = 4;
   $('intro').hidden = true; $('finishMenu').hidden = true;
@@ -617,9 +644,84 @@ function startRace() {
   document.activeElement?.blur();
   showBoard([]);
 }
-$('playBtn').addEventListener('click', startRace);
+// Race again: in a friend race only the host can start it (both headsets start together)
+function startRace() {
+  if (isGuest()) return;
+  if (multi && mp.connected) mp.startForBoth({});
+  else { multi = false; beginRace(); }
+}
+// Back to the menu (play solo / host / join)
+function openMenu() {
+  state = 'intro'; paused = false;
+  $('finishMenu').hidden = true; $('intro').hidden = true;
+  for (const id of ['hud', 'speed', 'map', 'big']) $(id).hidden = true;
+  $('pauseBtn').hidden = true;
+  showBoard([]);
+  multi = false;
+  placeOnGrid();
+  mp.open();
+}
+const mp = createMultiplayer({
+  THREE, renderer, gameId: 'kart', title: 'KART RACE', color: '#3d8bff', soloLabel: 'RACE THE BOTS',
+  onSolo: () => { multi = false; beginRace(); },
+  onStart: () => { multi = true; beginRace(); },
+  onMessage: (msg) => onNet(msg),
+  onLeft: () => {
+    // Keep racing the bots if your friend leaves
+    multi = false;
+    const fi = racers.indexOf(friend); if (fi >= 0) racers.splice(fi, 1);
+    friend.mesh.visible = false;
+    if (state === 'racing' || state === 'countdown') { lapMsg = 'FRIEND LEFT'; lapMsgT = 2.5; }
+    if (state === 'finished') updateResults();
+  },
+  onArcade: () => goToArcade(),
+});
+mp.panel.position.set(0, 1.5, -1.3);
+player.mesh.add(mp.panel);
+$('playBtn').addEventListener('click', () => { $('intro').hidden = true; mp.open(); });
 $('againBtn').addEventListener('click', startRace);
+$('menuBtn').addEventListener('click', openMenu);
 placeOnGrid();
+
+// ---------- Multiplayer messages ----------
+let netT = 0, botNetT = 0;
+function sendNet(dt) {
+  if (!multi || !mp.connected) return;
+  netT -= dt;
+  if (netT <= 0) {
+    netT = 0.05;   // 20 times a second
+    mp.send({ t: 'k', s: player.s, x: player.pos.x, y: player.y, z: player.pos.z, yaw: player.mesh.rotation.y,
+      sp: player.speed, st: player.steer, bo: player.boost, f: player.finished ? 1 : 0, ft: player.finishTime });
+  }
+  if (mp.role === 'host') {
+    botNetT -= dt;
+    if (botNetT <= 0) { botNetT = 0.07; mp.send({ t: 'b', b: bots.map(b => [b.s, b.lane, b.y, b.speed, b.boost, b.finished ? 1 : 0, b.finishTime]) }); }
+  }
+}
+function onNet(msg) {
+  if (msg.t === 'k') {
+    friend.target.set(msg.x, msg.y, msg.z); friend.targetYaw = msg.yaw;
+    friend.s = msg.s; friend.speed = msg.sp; friend.steer = msg.st; friend.boost = msg.bo; friend.y = msg.y;
+    const wasDone = friend.finished;
+    friend.finished = !!msg.f; friend.finishTime = msg.ft;
+    if (friend.finished && !wasDone && state === 'finished') updateResults();
+  }
+  if (msg.t === 'b' && isGuest()) msg.b.forEach((d, i) => { if (bots[i]) { bots[i].net = d; bots[i].netAge = 0; } });
+}
+// On the guest's headset the bots follow what the host's game says
+function followBot(b, dt) {
+  if (!b.net) { placeBot(b, b.lane, dt); return; }
+  const [s, lane, y, speed, boost, fin, ft] = b.net;
+  b.netAge = (b.netAge || 0) + dt;
+  if (b.netAge < 0.5) b.net[0] = s + speed * dt / SEG;   // keep it moving between messages (but not forever if they stop)
+  b.s += (b.net[0] - b.s) * Math.min(1, dt * 8);
+  const oldLane = b.lane;
+  b.lane += (lane - b.lane) * Math.min(1, dt * 8);
+  b.speed = speed; b.boost = boost; b.y += (y - b.y) * Math.min(1, dt * 10);
+  b.airborne = b.y > 0.1;
+  b.finished = !!fin; b.finishTime = ft;
+  placeBot(b, oldLane, dt);
+}
 
 function finishRace() {
   player.finished = true; player.finishTime = raceT;
@@ -650,7 +752,9 @@ function updateResults() {
   const place = list.indexOf(player) + 1;
   showBoard([place === 1 ? 'YOU WIN!' : ordinal(place) + ' PLACE',
     ...list.map((r, n) => `${ordinal(n + 1)} ${r.name} ${r.finished ? fmt(r.finishTime) : '...'}`),
-    'TRIGGER: RACE AGAIN   Y: ARCADE'], place === 1 ? '#ffd23d' : '#ffffff');
+    (isGuest() ? 'WAITING FOR HOST' : 'TRIGGER: AGAIN') + '  GRIP: MENU  Y: ARCADE'], place === 1 ? '#ffd23d' : '#ffffff');
+  // In a friend race only the host can start the next one
+  $('againBtn').hidden = isGuest();
 }
 
 // ---------- Pause ----------
@@ -705,7 +809,10 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.addEventListener('connected', e => { c.userData.input = e.data; });
   c.addEventListener('disconnected', () => { c.userData.input = null; });
-  c.addEventListener('selectstart', () => { if (state === 'finished' && stateT > 1.5) startRace(); });
+  c.addEventListener('selectstart', () => {
+    if (mp.select(c)) return;   // pointing at the menu
+    if (state === 'finished' && stateT > 1.5) startRace();
+  });
   seat.add(c);
   controllers.push(c);
 }
@@ -717,7 +824,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   camera.position.set(0, 0, 0); camera.quaternion.identity();
   seat.position.set(0, 0, 0); seat.rotation.set(0, 0, 0);
   recenterFrames = 15;
-  if (state === 'intro') startRace();
+  if (state === 'intro') mp.open();   // the menu floats in front of your kart
   const s = renderer.xr.getSession();
   s.addEventListener('visibilitychange', () => { if (s.visibilityState !== 'visible') setPaused(true); });
 });
@@ -759,7 +866,10 @@ function readVR() {
       if (bb && !c.userData.bWas && state === 'racing' && !paused) resetToTrack();
       c.userData.bWas = bb;
     }
-    if (b[1]?.pressed) out.drift = true;
+    if (b[1]?.pressed) {
+      out.drift = true;
+      if (state === 'finished' && stateT > 1.5) openMenu();   // grip on the results: back to the menu
+    }
   }
   return out;
 }
@@ -866,7 +976,7 @@ function updateBot(b, dt) {
   const turn = turnAhead(i, 30);
   let target = b.max * (1 - THREE.MathUtils.clamp(turn * 0.3, 0, 0.3));
   // Keep the race close: catch up a little when behind you, ease off a little when far ahead
-  const gap = player.s - b.s;
+  const gap = (multi ? Math.max(player.s, friend.s) : player.s) - b.s;
   target *= 1 + THREE.MathUtils.clamp(gap / (N * 0.4), -0.12, 0.14);
   if (b.finished) target *= 0.6;
   if (b.boost > 0) { target = BOOST_SPEED * 0.92; b.boost -= dt; }
@@ -882,16 +992,19 @@ function updateBot(b, dt) {
   b.laneTarget = THREE.MathUtils.clamp(b.laneTarget, -(ROAD_WIDTH / 2 - 1.2), ROAD_WIDTH / 2 - 1.2);
   const oldLane = b.lane;
   b.lane += THREE.MathUtils.clamp(b.laneTarget - b.lane, -3 * dt, 3 * dt);
-  // Position and facing come straight from the track
-  trackAt(b.s, tmp, b.lane);
   updateHeight(b, b.s, b.lane, dt);
+  placeBot(b, oldLane, dt);
+  // Lap finish
+  if (!b.finished && b.s >= LAPS * N) { b.finished = true; b.finishTime = raceT; if (state === 'finished') updateResults(); }
+}
+// Position and facing come straight from the track
+function placeBot(b, oldLane, dt) {
+  trackAt(b.s, tmp, b.lane);
   b.mesh.position.set(tmp.x, b.y, tmp.z);
-  const t = T[i];
+  const t = T[wrap(Math.floor(b.s))];
   b.yaw = yawOf(t) - Math.atan2(b.lane - oldLane, Math.max(0.01, b.speed * dt)) * 0.6;
   b.mesh.rotation.set(b.airborne ? -0.12 : 0, b.yaw, 0);
   b.steerLook = THREE.MathUtils.clamp((b.lane - oldLane) / Math.max(dt, 1e-3) * -0.3, -1, 1);
-  // Lap finish
-  if (!b.finished && b.s >= LAPS * N) { b.finished = true; b.finishTime = raceT; if (state === 'finished') updateResults(); }
 }
 
 // Bumping into each other
@@ -903,9 +1016,9 @@ function bumpKarts() {
     if (d < 1.7 && d > 1e-3 && Math.abs(player.y - b.y) < 1) {
       const push = (1.7 - d) / d;
       player.pos.x += dx * push * 0.6; player.pos.z += dz * push * 0.6;
-      // Shove the bot sideways the other way
+      // Shove the bot sideways the other way (your friend's own game moves their kart)
       tmp.set(dx, 0, dz).normalize();
-      b.lane -= tmp.dot(NL[wrap(Math.floor(b.s))]) * (1.7 - d) * 0.6;
+      if (b.isBot && !isGuest()) b.lane -= tmp.dot(NL[wrap(Math.floor(b.s))]) * (1.7 - d) * 0.6;
       if (Math.abs(player.speed - b.speed) > 2 && !b.bumpCool) { thud(); haptic(0.7, 120); b.bumpCool = 0.4; }
       player.speed *= 0.97;
     }
@@ -937,7 +1050,7 @@ function drawMap() {
   for (const r of racers) {
     const pos = r.isPlayer ? r.pos : r.mesh.position;
     const [x, y] = mapXY(pos.x, pos.z);
-    g.fillStyle = r.isPlayer ? '#3d8bff' : '#' + BOT_COLORS[racers.indexOf(r) - 1].toString(16).padStart(6, '0');
+    g.fillStyle = '#' + r.color.toString(16).padStart(6, '0');
     g.fillRect(x - (r.isPlayer ? 4 : 3), y - (r.isPlayer ? 4 : 3), r.isPlayer ? 8 : 6, r.isPlayer ? 8 : 6);
   }
 }
@@ -949,7 +1062,7 @@ function updateHud(dt) {
   const place = standings().indexOf(player) + 1;
   const lap = THREE.MathUtils.clamp(Math.floor(player.s / N) + 1, 1, LAPS);
   const kmh = Math.round(Math.abs(player.speed) * 3.6);
-  $('pos').textContent = ordinal(place) + ' / 4';
+  $('pos').textContent = ordinal(place) + ' / ' + racers.length;
   $('lap').textContent = `LAP ${lap}/${LAPS}`;
   $('time').textContent = fmt(raceT);
   $('best').textContent = isFinite(bestTime) ? 'BEST ' + fmt(bestTime) : '';
@@ -1006,8 +1119,9 @@ renderer.setAnimationLoop(() => {
       raceT += state === 'racing' ? dt : 0;
     }
     updatePlayer(dt, state === 'countdown' ? { gas: 0, brake: 0, steer: input.steer, drift: false } : input);
-    for (const r of racers) if (!r.isPlayer) updateBot(r, dt);
+    for (const b of bots) isGuest() ? followBot(b, dt) : updateBot(b, dt);
     bumpKarts();
+    sendNet(dt);
 
     // Laps
     if (state === 'racing') {
@@ -1030,7 +1144,16 @@ renderer.setAnimationLoop(() => {
     }
     updateHud(dt);
   } else if (state === 'intro') {
-    for (const r of racers) if (!r.isPlayer) updateBot(r, dt);   // parked on the grid behind the menu
+    for (const b of bots) updateBot(b, dt);   // parked on the grid behind the menu
+  }
+  mp.updatePointer(controllers);
+  // Your friend's kart glides smoothly to where their game says it is
+  if (friend.mesh.visible) {
+    friend.mesh.position.lerp(friend.target, Math.min(1, dt * 12));
+    let dy = friend.targetYaw - friend.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    friend.yaw += dy * Math.min(1, dt * 12);
+    friend.mesh.rotation.set(0, friend.yaw, 0);
+    animateKart(friend, friend.steer, paused ? 0 : dt);
   }
 
   // Engine sound follows your speed
@@ -1045,7 +1168,7 @@ renderer.setAnimationLoop(() => {
   player.mesh.position.set(player.pos.x, player.y, player.pos.z);
   player.mesh.rotation.set(player.airborne ? -0.1 : 0, player.yaw + (player.drifting ? player.steer * 0.35 : 0), 0);
   animateKart(player, player.steer, paused ? 0 : dt);
-  for (const r of racers) if (!r.isPlayer) animateKart(r, r.steerLook || 0, paused ? 0 : dt);
+  for (const b of bots) animateKart(b, b.steerLook || 0, paused ? 0 : dt);
   if (player.mesh.userData.driver) player.mesh.userData.driver.visible = !inVR;
 
   // Camera: sitting in the kart in VR, chasing behind it on PC
