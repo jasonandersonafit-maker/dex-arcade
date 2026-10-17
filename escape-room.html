@@ -1,0 +1,1860 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Cinzel:wght@700&family=Caveat:wght@600&display=swap" rel="stylesheet">
+<style>
+  /* A dim, old study at night: one dark look on purpose. */
+  :root { --bg:#0b0907; --fg:#f1e9dc; --muted:#b5a690; --gold:#e0b45a; --panel:rgba(16,12,9,.94); color-scheme: dark; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); overflow:hidden;
+               font-family:'Press Start 2P', ui-monospace, monospace; }
+  [hidden] { display:none !important; }
+  canvas { display:block; }
+  canvas.playing { cursor:none; }
+  #hud { position:fixed; left:16px; top:16px; display:flex; flex-direction:column; gap:8px; font-size:10px;
+         text-shadow:2px 2px 0 #000; pointer-events:none; color:var(--muted); }
+  #hud b { color:var(--gold); }
+  #inv { position:fixed; left:0; right:0; bottom:18px; display:flex; justify-content:center; gap:8px; flex-wrap:wrap; padding:0 16px; pointer-events:none; }
+  #inv span { font-size:9px; background:rgba(16,12,9,.8); border:2px solid #4a3a26; padding:8px 10px; color:var(--fg); }
+  #inv span.on { border-color:#a46cff; box-shadow:0 0 12px #8a4cff; }
+  #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:rgba(255,255,255,.6); pointer-events:none; }
+  #cross.hot { width:10px; height:10px; margin:-5px 0 0 -5px; background:transparent; border:2px solid var(--gold); }
+  #prompt { position:fixed; left:0; right:0; top:calc(50% + 22px); text-align:center; font-size:10px; color:var(--gold); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
+  #toast { position:fixed; left:50%; top:70px; transform:translateX(-50%); max-width:min(620px, calc(100vw - 32px)); box-sizing:border-box;
+           background:rgba(16,12,9,.88); border:2px solid #4a3a26; padding:12px 16px; font-size:10px; line-height:1.8; text-align:center; pointer-events:none; }
+  #reader { position:fixed; inset:0; display:grid; place-items:center; align-content:center; gap:14px; background:rgba(0,0,0,.72); padding:16px; }
+  #reader img { max-height:78vh; max-width:calc(100vw - 32px); box-shadow:0 10px 40px #000; }
+  #reader p { margin:0; font-size:9px; color:var(--muted); text-align:center; }
+  .overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(0,0,0,.55); padding:16px; overflow:auto; }
+  .card { background:var(--panel); border:3px solid #000; outline:3px solid #4a3a26; padding:24px; max-width:560px;
+          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7; }
+  .card h1 { margin:0; font-family:'Cinzel', Georgia, serif; font-weight:700; font-size:clamp(34px, 8vw, 54px); letter-spacing:.08em;
+             color:var(--gold); text-shadow:0 0 18px rgba(224,180,90,.45); }
+  .card h2 { margin:0; font-family:'Cinzel', Georgia, serif; font-size:30px; color:var(--gold); }
+  .card p { margin:0; font-size:10px; color:var(--muted); }
+  .card .big { font-size:13px; color:var(--fg); }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:12px; text-align:left; font-size:8px; color:var(--muted); }
+  .controls b { color:var(--fg); display:block; margin-bottom:4px; }
+  @media (max-width: 520px) { .controls { grid-template-columns:1fr; } }
+  button.mc { font:inherit; font-size:12px; color:#fff; background:#3e3226; border:3px solid #000;
+              box-shadow: inset -3px -3px 0 #221a12, inset 3px 3px 0 #6a5844; padding:12px 16px; cursor:pointer; text-shadow:2px 2px 0 #000; }
+  button.mc:hover, button.mc:focus-visible { background:#6a5232; outline:none; }
+  .sens { display:flex; flex-direction:column; gap:8px; font-size:9px; color:var(--muted); }
+  .sens input { width:100%; accent-color:#b08a4a; }
+  a.back { font-size:9px; color:var(--muted); }
+  #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
+</style>
+</head>
+<body>
+<div id="hud" hidden>
+  <div>TIME <b id="time">0:00</b></div>
+  <div>HINTS <b id="hintCount">0</b></div>
+</div>
+<div id="inv" hidden></div>
+<div id="cross" hidden></div>
+<div id="prompt" hidden></div>
+<div id="toast" hidden></div>
+<div id="reader" hidden><img id="readerImg" alt="A handwritten note"><p>CLICK OR PRESS E TO PUT IT DOWN</p></div>
+<button id="pauseBtn" class="mc" type="button" hidden>❚❚ PAUSE</button>
+
+<div id="intro" class="overlay">
+  <div class="card">
+    <h1>Escape Room</h1>
+    <p class="big">You wake up locked in an old professor's study. The door has a keypad and the power is out.</p>
+    <p>Search the room, read the clues, crack the codes and get out as fast as you can.</p>
+    <div class="controls">
+      <div><b>PC</b>Mouse: look around<br>W A S D: walk<br>Click or E: use / pick up<br>F: UV flashlight<br>H: hint · P: pause</div>
+      <div><b>QUEST</b>Left stick: walk<br>Right stick: turn<br>Trigger: use / pick up<br>A: UV flashlight · B: hint<br>Y: pause</div>
+    </div>
+    <p id="bestLine"></p>
+    <button id="playBtn" class="mc" type="button">START</button>
+    <a class="back" href="index.html">← Back to Arcade</a>
+  </div>
+</div>
+
+<div id="pauseMenu" class="overlay" hidden>
+  <div class="card">
+    <h2>Paused</h2>
+    <button id="resumeBtn" class="mc" type="button">Resume</button>
+    <button id="hintBtn" class="mc" type="button">Give me a hint</button>
+    <label class="sens" for="sens">MOUSE SENSITIVITY: <span id="sensVal">100%</span>
+      <input id="sens" type="range" min="0" max="200" step="1" value="100">
+    </label>
+    <button id="restartBtn" class="mc" type="button">Start Over</button>
+    <button id="arcadeBtn" class="mc" type="button">Back to Arcade</button>
+  </div>
+</div>
+
+<div id="win" class="overlay" hidden>
+  <div class="card">
+    <h1>You Escaped!</h1>
+    <p class="big" id="winTime"></p>
+    <button id="againBtn" class="mc" type="button">Play Again</button>
+    <button id="winArcadeBtn" class="mc" type="button">Back to Arcade</button>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// ---------- Settings you can tweak ----------
+const WALK_SPEED = 2.3;          // slower than the action games: it's a small room
+const REACH = 2.6;               // how far away you can use things on PC (meters)
+const VR_REACH = 3.2;            // same, for the Quest laser
+const EYE = 1.62;
+const EDGE_TURN_SPEED = 2.4;
+// Mouse turning uses Minecraft's exact formula (0.5 = Minecraft's default "100%")
+let mcSensitivity = 0.5;
+try { const s = parseFloat(localStorage.getItem('mcSensitivity')); if (s >= 0 && s <= 1) mcSensitivity = s; } catch (e) {}
+function radiansPerPixel() { const f = mcSensitivity * 0.6 + 0.2; return f * f * f * 8 * 0.15 * Math.PI / 180; }
+
+// ---------- Basic setup ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;   // see shadowFrames in the main loop
+let shadowFrames = 3;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;   // film-like light, keeps the lamps from looking flat
+renderer.toneMappingExposure = 1.15;
+renderer.xr.enabled = true;
+document.body.appendChild(renderer.domElement);
+const vrButton = VRButton.createButton(renderer);
+document.body.appendChild(vrButton);
+// No VR headset (like on a PC): hide the button instead of showing "VR NOT SUPPORTED"
+if (!navigator.xr) vrButton.style.display = 'none';
+else navigator.xr.isSessionSupported('immersive-vr').then(ok => { if (!ok) { vrButton.style.display = 'none'; setTimeout(() => { vrButton.style.display = 'none'; }, 100); } }).catch(() => { vrButton.style.display = 'none'; });
+
+// Quest buttons, read straight from the headset:
+// Y pauses / resumes, B while paused goes back to the arcade (otherwise B = hint), A = UV flashlight
+const vrPrev = { y: false, b: false, a: false };
+function vrButtons() {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  let y = false, b = false, a = false;
+  for (const src of session.inputSources) {
+    if (!src.gamepad) continue;
+    if (src.handedness === 'left') y = !!src.gamepad.buttons[5]?.pressed;
+    if (src.handedness === 'right') { b = !!src.gamepad.buttons[5]?.pressed; a = !!src.gamepad.buttons[4]?.pressed; }
+  }
+  if (y && !vrPrev.y) setPaused(!paused);
+  if (b && !vrPrev.b) { if (paused) goToArcade(); else if (state === 'play') useHint(); }
+  if (a && !vrPrev.a && state === 'play' && !paused) toggleUV();
+  vrPrev.y = y; vrPrev.b = b; vrPrev.a = a;
+}
+// Stick calibration. On most headsets this changes nothing. If a stick drifts, hold both grip buttons for
+// 2 seconds in the arcade (sticks let go): that headset remembers where its sticks rest, and every game
+// treats that spot as the middle. It's saved only on that headset.
+let stickRest = {};
+try { stickRest = JSON.parse(localStorage.getItem('dexStickRest') || '{}'); } catch (e) {}
+const STICK_DEAD_ZONE = 0.12;   // tiny pushes are ignored
+function recenterAxis(v, rest) {
+  if (v >= rest) return rest >= 0.99 ? 0 : (v - rest) / (1 - rest);
+  return rest <= -0.99 ? 0 : (v - rest) / (1 + rest);
+}
+function stickDeadZone(axes, hand) {
+  const out = Array.from(axes), rest = stickRest[hand];
+  for (const i of [0, 2]) {
+    let x = out[i] || 0, y = out[i + 1] || 0;
+    if (rest) { x = recenterAxis(x, rest[i] || 0); y = recenterAxis(y, rest[i + 1] || 0); }
+    const len = Math.hypot(x, y);
+    const k = len < STICK_DEAD_ZONE ? 0 : Math.min(1, (len - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE)) / len;
+    out[i] = x * k; out[i + 1] = y * k;
+  }
+  return out;
+}
+// Inside the Dex Arcade Quest app, jump straight into VR (opening the app counts as the click)
+const inQuestApp = window.getDigitalGoodsService !== undefined;
+if (inQuestApp && navigator.xr) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    if (!ok || renderer.xr.isPresenting) return;
+    navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'] })
+      .then(s => { if (!renderer.xr.isPresenting) renderer.xr.setSession(s); else s.end(); })
+      .catch(() => {});
+  });
+}
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050403);
+// Soft reflections on brass, glass and varnish
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+const rig = new THREE.Group();
+scene.add(rig);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.03, 60);
+camera.rotation.order = 'YXZ';
+rig.add(camera);
+
+// Everything you can bump into, point at or pick up lives in "world"
+const world = new THREE.Group();
+scene.add(world);
+
+// ---------- Room size ----------
+const X0 = -3, X1 = 3, Z0 = -2.5, Z1 = 2.5, RH = 2.8;   // 6 m wide, 5 m deep, 2.8 m ceiling
+const DOOR_Z0 = -0.5, DOOR_Z1 = 0.5, DOOR_H = 2.15;      // exit door in the east wall
+
+// ---------- Helpers ----------
+const rnd = Math.random;
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const RB = (w, h, d, r = 0.03) => new RoundedBoxGeometry(w, h, d, 3, r);
+const std = (o) => new THREE.MeshStandardMaterial({ envMapIntensity: 0.35, ...o });
+function add(parent, geo, mat, x = 0, y = 0, z = 0, opts = {}) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  m.castShadow = opts.cast ?? true;
+  m.receiveShadow = opts.receive ?? true;
+  parent.add(m);
+  return m;
+}
+function canvasTex(w, h, draw, { repeat = null, srgb = true } = {}) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  draw(g, w, h);
+  const t = new THREE.CanvasTexture(c);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); }
+  t.userData = { canvas: c, g };
+  return t;
+}
+function redrawTex(t, draw) {
+  const { canvas, g } = t.userData;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.shadowBlur = 0;
+  g.clearRect(0, 0, canvas.width, canvas.height);
+  draw(g, canvas.width, canvas.height);
+  t.needsUpdate = true;
+}
+const rgb = (r, g, b, a = 1) => `rgba(${r | 0},${g | 0},${b | 0},${a})`;
+const hexRGB = (hex) => { const n = parseInt(hex.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+function wrapText(g, text, maxW) {
+  const words = text.split(' '), lines = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (g.measureText(test).width > maxW && line) { lines.push(line); line = w; } else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// ---------- Textures (all painted in code, no image files) ----------
+function drawWoodGrain(g, w, h, base, dark, lines = 160, horizontal = false) {
+  const [r, gg, b] = hexRGB(base), [dr, dg, db] = hexRGB(dark);
+  g.fillStyle = base; g.fillRect(0, 0, w, h);
+  const L = horizontal ? w : h, S = horizontal ? h : w;
+  for (let i = 0; i < lines; i++) {
+    const p = rnd() * S, k = rnd();
+    g.strokeStyle = rgb(r + (dr - r) * k, gg + (dg - gg) * k, b + (db - b) * k, 0.25 + rnd() * 0.45);
+    g.lineWidth = 0.5 + rnd() * 2.5;
+    g.beginPath();
+    const amp = 2 + rnd() * 6, freq = 0.004 + rnd() * 0.01, ph = rnd() * 9;
+    for (let s = 0; s <= L; s += 8) {
+      const q = p + Math.sin(s * freq + ph) * amp + Math.sin(s * freq * 3.1 + ph) * amp * 0.3;
+      horizontal ? (s ? g.lineTo(s, q) : g.moveTo(s, q)) : (s ? g.lineTo(q, s) : g.moveTo(q, s));
+    }
+    g.stroke();
+  }
+}
+const woodTex = (base, dark, horizontal = false) => canvasTex(512, 512, (g, w, h) => drawWoodGrain(g, w, h, base, dark, 170, horizontal));
+
+// Oak plank floor
+const floorTex = canvasTex(1024, 1024, (g, w, h) => {
+  const rows = 8, ph = h / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -rnd() * w * 0.6;
+    while (x < w) {
+      const len = w * (0.4 + rnd() * 0.45);
+      const k = rnd();
+      const base = [118 + k * 34, 76 + k * 22, 44 + k * 12];
+      const c = document.createElement('canvas'); c.width = Math.ceil(len); c.height = Math.ceil(ph);
+      const cg = c.getContext('2d');
+      drawWoodGrain(cg, c.width, c.height, '#' + base.map(v => (v | 0).toString(16).padStart(2, '0')).join(''), '#3a2210', 40, true);
+      if (rnd() < 0.35) {   // a knot
+        const kx = rnd() * c.width, ky = rnd() * c.height;
+        const grd = cg.createRadialGradient(kx, ky, 1, kx, ky, 9);
+        grd.addColorStop(0, 'rgba(40,20,8,0.9)'); grd.addColorStop(1, 'rgba(40,20,8,0)');
+        cg.fillStyle = grd; cg.beginPath(); cg.ellipse(kx, ky, 14, 6, 0, 0, Math.PI * 2); cg.fill();
+      }
+      g.drawImage(c, x, r * ph);
+      if (x + len > w) g.drawImage(c, x - w, r * ph);   // wrap so the texture tiles
+      g.fillStyle = 'rgba(25,14,6,0.95)'; g.fillRect(x, r * ph, 3, ph); if (x < 0) g.fillRect(x + w, r * ph, 3, ph);
+      x += len;
+    }
+    g.fillStyle = 'rgba(25,14,6,0.95)'; g.fillRect(0, r * ph, w, 3);
+  }
+  // Varnish wear and dust
+  for (let i = 0; i < 40; i++) {
+    const x = rnd() * w, y = rnd() * h, s = 40 + rnd() * 140;
+    const grd = g.createRadialGradient(x, y, 0, x, y, s);
+    grd.addColorStop(0, `rgba(255,230,190,${rnd() * 0.06})`); grd.addColorStop(1, 'rgba(255,230,190,0)');
+    g.fillStyle = grd; g.fillRect(x - s, y - s, s * 2, s * 2);
+  }
+}, { repeat: [5, 4.2] });
+
+// Dark green damask wallpaper
+function damask(g, cx, cy, s, color) {
+  g.fillStyle = color; g.strokeStyle = color; g.lineWidth = 3;
+  g.save(); g.translate(cx, cy);
+  for (const m of [1, -1]) {
+    g.save(); g.scale(m, 1);
+    g.beginPath(); g.moveTo(0, -s); g.bezierCurveTo(s * 0.5, -s * 0.7, s * 0.7, -s * 0.1, s * 0.15, s * 0.2);
+    g.bezierCurveTo(s * 0.45, s * 0.45, s * 0.35, s * 0.8, 0, s); g.stroke();
+    g.beginPath(); g.ellipse(s * 0.38, -s * 0.35, s * 0.12, s * 0.22, 0.6, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(s * 0.3, s * 0.5, s * 0.08, s * 0.16, -0.5, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.moveTo(s * 0.15, s * 0.2); g.quadraticCurveTo(s * 0.7, s * 0.1, s * 0.75, -s * 0.15); g.stroke();
+    g.restore();
+  }
+  g.beginPath(); g.ellipse(0, 0, s * 0.12, s * 0.3, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.arc(0, -s * 0.55, s * 0.08, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+const wallpaperTex = canvasTex(512, 512, (g, w, h) => {
+  g.fillStyle = '#1f3428'; g.fillRect(0, 0, w, h);
+  const motif = 'rgba(176,150,92,0.22)';
+  for (const [x, y] of [[w / 2, h / 2], [0, 0], [w, 0], [0, h], [w, h]]) damask(g, x, y, 120, motif);
+  for (const [x, y] of [[w / 2, 0], [w / 2, h], [0, h / 2], [w, h / 2]]) damask(g, x, y, 55, 'rgba(176,150,92,0.13)');
+  for (let i = 0; i < 5000; i++) { g.fillStyle = rnd() < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.04)'; g.fillRect(rnd() * w, rnd() * h, 2, 2); }
+});
+wallpaperTex.wrapS = wallpaperTex.wrapT = THREE.RepeatWrapping;
+
+// Walnut wall paneling (wainscot) - one raised panel per tile
+const panelTex = canvasTex(512, 512, (g, w, h) => {
+  drawWoodGrain(g, w, h, '#4a2c1a', '#24130a', 150);
+  const m = 46;
+  g.strokeStyle = 'rgba(255,220,170,0.18)'; g.lineWidth = 8;
+  g.beginPath(); g.moveTo(m, h - m); g.lineTo(m, m); g.lineTo(w - m, m); g.stroke();
+  g.strokeStyle = 'rgba(0,0,0,0.55)';
+  g.beginPath(); g.moveTo(w - m, m); g.lineTo(w - m, h - m); g.lineTo(m, h - m); g.stroke();
+  g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 4; g.strokeRect(m + 22, m + 22, w - 2 * m - 44, h - 2 * m - 44);
+  g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(0, 0, 6, h); g.fillRect(w - 6, 0, 6, h);
+});
+panelTex.wrapS = panelTex.wrapT = THREE.RepeatWrapping;
+
+const ceilTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#d9d2c4'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 6000; i++) { g.fillStyle = `rgba(${rnd() < 0.5 ? '0,0,0' : '255,255,255'},${rnd() * 0.06})`; g.fillRect(rnd() * w, rnd() * h, 2, 2); }
+}, { repeat: [6, 5] });
+
+const steelTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#9a9ea4'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 900; i++) { const y = rnd() * h; g.fillStyle = `rgba(${rnd() < 0.5 ? '0,0,0' : '255,255,255'},${rnd() * 0.12})`; g.fillRect(0, y, w, 1); }
+  for (let i = 0; i < 40; i++) { g.fillStyle = 'rgba(60,40,20,0.08)'; g.beginPath(); g.arc(rnd() * w, rnd() * h, 4 + rnd() * 18, 0, Math.PI * 2); g.fill(); }
+});
+
+const leatherTex = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 7000; i++) { g.fillStyle = `rgba(0,0,0,${rnd() * 0.12})`; g.fillRect(rnd() * w, rnd() * h, 2, 2); }
+  for (let i = 0; i < 30; i++) { g.strokeStyle = 'rgba(0,0,0,0.08)'; g.lineWidth = 1; g.beginPath(); const x = rnd() * w, y = rnd() * h; g.moveTo(x, y); g.lineTo(x + (rnd() - 0.5) * 60, y + (rnd() - 0.5) * 60); g.stroke(); }
+}, { repeat: [2, 2] });
+
+// Persian rug
+const rugTex = canvasTex(1024, 720, (g, w, h) => {
+  const fr = 26;
+  g.fillStyle = '#d9ccb0'; g.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 5) { g.fillStyle = `rgba(235,222,190,${0.6 + rnd() * 0.4})`; g.fillRect(0, y, fr, 2); g.fillRect(w - fr, y, fr, 2); }
+  const x0 = fr, x1 = w - fr, W = x1 - x0;
+  g.fillStyle = '#6e1a1c'; g.fillRect(x0, 0, W, h);
+  const rect = (inset, lw, color) => { g.strokeStyle = color; g.lineWidth = lw; g.strokeRect(x0 + inset, inset, W - 2 * inset, h - 2 * inset); };
+  rect(30, 40, '#1d2440');
+  rect(84, 64, '#1d2440');
+  rect(12, 6, '#c79a4a'); rect(52, 6, '#c79a4a'); rect(118, 6, '#c79a4a');
+  // little gold diamonds along the wide border
+  g.fillStyle = '#c79a4a';
+  const dia = (x, y, s) => { g.beginPath(); g.moveTo(x, y - s); g.lineTo(x + s, y); g.lineTo(x, y + s); g.lineTo(x - s, y); g.fill(); };
+  for (let x = x0 + 100; x < x1 - 90; x += 30) { dia(x, 84, 9); dia(x, h - 84, 9); }
+  for (let y = 100; y < h - 90; y += 30) { dia(x0 + 84, y, 9); dia(x1 - 84, y, 9); }
+  g.fillStyle = '#b8323a';
+  for (let x = x0 + 115; x < x1 - 90; x += 30) { g.fillRect(x - 3, 81, 6, 6); g.fillRect(x - 3, h - 87, 6, 6); }
+  // central medallion
+  const cx = w / 2, cy = h / 2;
+  const colors = ['#1d2440', '#9a7a3e', '#7a1e24', '#b8a684', '#1d2440', '#9a7a3e', '#5e1618'];
+  colors.forEach((c, i) => {
+    const sx = 240 - i * 32, sy = 160 - i * 21;
+    g.fillStyle = c; g.beginPath();
+    for (let a = 0; a <= 64; a++) {
+      const ang = (a / 64) * Math.PI * 2, rr = 1 + Math.cos(ang * 4) * 0.1 + Math.cos(ang * 16) * 0.03;
+      const px = cx + Math.cos(ang) * sx * rr, py = cy + Math.sin(ang) * sy * rr;
+      a ? g.lineTo(px, py) : g.moveTo(px, py);
+    }
+    g.fill();
+  });
+  // corner pieces and little flowers in the field
+  g.fillStyle = '#1d2440';
+  for (const [x, y, sx, sy] of [[x0 + 124, 124, 1, 1], [x1 - 124, 124, -1, 1], [x0 + 124, h - 124, 1, -1], [x1 - 124, h - 124, -1, -1]]) {
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + sx * 130, y); g.quadraticCurveTo(x + sx * 60, y + sy * 60, x, y + sy * 95); g.fill();
+  }
+  for (let i = 0; i < 70; i++) {
+    const x = x0 + 150 + rnd() * (W - 300), y = 150 + rnd() * (h - 300);
+    if (Math.hypot((x - cx) / 280, (y - cy) / 190) < 1) continue;
+    g.fillStyle = ['#c79a4a', '#e2d3b0', '#1d2440'][i % 3];
+    for (let p = 0; p < 4; p++) { g.beginPath(); g.ellipse(x + Math.cos(p * Math.PI / 2) * 6, y + Math.sin(p * Math.PI / 2) * 6, 5, 3, p * Math.PI / 2, 0, Math.PI * 2); g.fill(); }
+  }
+  // wear: woven speckle and a faded middle
+  for (let i = 0; i < 26000; i++) { g.fillStyle = rnd() < 0.5 ? `rgba(0,0,0,${rnd() * 0.2})` : `rgba(255,240,210,${rnd() * 0.08})`; g.fillRect(x0 + rnd() * W, rnd() * h, 2, 2); }
+  const grd = g.createRadialGradient(cx, cy, 30, cx, cy, 480);
+  grd.addColorStop(0, 'rgba(255,230,200,0.1)'); grd.addColorStop(1, 'rgba(0,0,0,0.15)');
+  g.fillStyle = grd; g.fillRect(x0, 0, W, h);
+});
+
+const doormatTex = canvasTex(512, 320, (g, w, h) => {
+  g.fillStyle = '#8a6236'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 16000; i++) { g.fillStyle = rnd() < 0.5 ? `rgba(40,24,8,${rnd() * 0.4})` : `rgba(210,170,110,${rnd() * 0.35})`; g.fillRect(rnd() * w, rnd() * h, 1 + rnd() * 3, 1); }
+  g.strokeStyle = '#2a1a0c'; g.lineWidth = 14; g.strokeRect(14, 14, w - 28, h - 28);
+  g.fillStyle = 'rgba(30,18,8,0.9)'; g.font = 'bold 74px Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('WELCOME', w / 2, h / 2 + 4);
+});
+
+// An oil painting: lake at sunset, with old yellowed varnish
+const paintingTex = canvasTex(900, 680, (g, w, h) => {
+  const sky = g.createLinearGradient(0, 0, 0, h * 0.55);
+  sky.addColorStop(0, '#3e5a7a'); sky.addColorStop(0.55, '#c9a37a'); sky.addColorStop(1, '#f0c88a');
+  g.fillStyle = sky; g.fillRect(0, 0, w, h * 0.56);
+  const stroke = (x, y, len, color, width, ang = 0) => { g.strokeStyle = color; g.lineWidth = width; g.lineCap = 'round'; g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len); g.stroke(); };
+  for (let i = 0; i < 260; i++) { const y = rnd() * h * 0.5; stroke(rnd() * w, y, 20 + rnd() * 60, `rgba(255,${200 + rnd() * 40 | 0},${150 + rnd() * 60 | 0},${0.08 + rnd() * 0.12})`, 4 + rnd() * 6, (rnd() - 0.5) * 0.2); }
+  // sun glow
+  const sun = g.createRadialGradient(w * 0.68, h * 0.47, 5, w * 0.68, h * 0.47, 160);
+  sun.addColorStop(0, 'rgba(255,240,200,0.95)'); sun.addColorStop(1, 'rgba(255,200,120,0)');
+  g.fillStyle = sun; g.fillRect(0, 0, w, h);
+  // mountains
+  const ridge = (base, amp, color, seed) => { g.fillStyle = color; g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 10) g.lineTo(x, base - Math.abs(Math.sin(x * 0.008 + seed)) * amp - Math.sin(x * 0.031 + seed) * amp * 0.2); g.lineTo(w, h); g.fill(); };
+  ridge(h * 0.52, 120, '#6f7b8e', 1.3);
+  ridge(h * 0.56, 70, '#4e5a5a', 4.1);
+  // lake with reflections
+  const lake = g.createLinearGradient(0, h * 0.56, 0, h * 0.78);
+  lake.addColorStop(0, '#c8a37a'); lake.addColorStop(1, '#40566a');
+  g.fillStyle = lake; g.fillRect(0, h * 0.56, w, h * 0.22);
+  for (let i = 0; i < 160; i++) stroke(rnd() * w, h * 0.57 + rnd() * h * 0.2, 10 + rnd() * 40, `rgba(255,230,190,${rnd() * 0.25})`, 2 + rnd() * 2);
+  // near shore and grass
+  g.fillStyle = '#34401f'; g.beginPath(); g.moveTo(0, h); g.lineTo(0, h * 0.74); for (let x = 0; x <= w; x += 20) g.lineTo(x, h * 0.76 + Math.sin(x * 0.02) * 12 + (x > w * 0.6 ? (x - w * 0.6) * 0.15 : 0)); g.lineTo(w, h); g.fill();
+  for (let i = 0; i < 700; i++) { const x = rnd() * w, y = h * 0.78 + rnd() * h * 0.22; stroke(x, y, 8 + rnd() * 16, `rgba(${60 + rnd() * 70 | 0},${70 + rnd() * 60 | 0},${25 + rnd() * 20 | 0},0.5)`, 2 + rnd() * 3, -Math.PI / 2 + (rnd() - 0.5) * 0.6); }
+  // dark trees on the left
+  for (let t = 0; t < 7; t++) {
+    const tx = 30 + t * 38 + rnd() * 20, ty = h * 0.78, th = 180 + rnd() * 140;
+    g.fillStyle = '#1e2414';
+    for (let k = 0; k < 9; k++) { g.beginPath(); g.ellipse(tx + (rnd() - 0.5) * 30, ty - th * (0.3 + k * 0.08), 26 - k * 2, 30, 0, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = '#2a1e12'; g.fillRect(tx - 4, ty - th * 0.3, 8, th * 0.3);
+  }
+  // varnish and cracks
+  g.fillStyle = 'rgba(120,85,25,0.18)'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = 'rgba(40,25,10,0.18)'; g.lineWidth = 1;
+  for (let i = 0; i < 260; i++) { let x = rnd() * w, y = rnd() * h; g.beginPath(); g.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * 30; y += (rnd() - 0.5) * 30; g.lineTo(x, y); } g.stroke(); }
+  const vig = g.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, w * 0.7);
+  vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(20,10,0,0.45)');
+  g.fillStyle = vig; g.fillRect(0, 0, w, h);
+});
+
+// Night sky outside the window
+const nightTex = canvasTex(512, 640, (g, w, h) => {
+  const sky = g.createLinearGradient(0, 0, 0, h);
+  sky.addColorStop(0, '#060a16'); sky.addColorStop(0.7, '#14223a'); sky.addColorStop(1, '#1c2a3a');
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  const moon = g.createRadialGradient(w * 0.7, h * 0.22, 4, w * 0.7, h * 0.22, 110);
+  moon.addColorStop(0, 'rgba(220,230,255,0.9)'); moon.addColorStop(0.18, 'rgba(200,215,255,0.5)'); moon.addColorStop(1, 'rgba(120,140,200,0)');
+  g.fillStyle = moon; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(40,52,80,0.75)';   // clouds
+  for (let i = 0; i < 18; i++) { g.beginPath(); g.ellipse(rnd() * w, rnd() * h * 0.5, 60 + rnd() * 90, 14 + rnd() * 16, 0, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = '#04060a';   // tree line
+  g.beginPath(); g.moveTo(0, h);
+  for (let x = 0; x <= w; x += 6) g.lineTo(x, h * 0.72 - Math.abs(Math.sin(x * 0.05)) * 50 - Math.sin(x * 0.013) * 30 - rnd() * 12);
+  g.lineTo(w, h); g.fill();
+});
+// Raindrops on the glass
+const rainTex = canvasTex(256, 512, (g, w, h) => {
+  for (let i = 0; i < 180; i++) {
+    const x = rnd() * w, y = rnd() * h, r = 1 + rnd() * 3;
+    g.fillStyle = 'rgba(200,215,240,0.35)'; g.beginPath(); g.ellipse(x, y, r, r * 1.4, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.6)'; g.fillRect(x - r * 0.3, y - r * 0.6, 1, 1);
+    if (rnd() < 0.25) { g.strokeStyle = 'rgba(200,215,240,0.18)'; g.lineWidth = r * 0.6; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (rnd() - 0.5) * 4, y - 20 - rnd() * 50); g.stroke(); }
+  }
+}, { repeat: [1, 1] });
+
+// Clock face with Roman numerals
+const clockTex = canvasTex(512, 512, (g, w, h) => {
+  const c = w / 2;
+  const grd = g.createRadialGradient(c, c, 20, c, c, c);
+  grd.addColorStop(0, '#f3ead6'); grd.addColorStop(1, '#d8c9a6');
+  g.fillStyle = grd; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#2a2018'; g.lineWidth = 3; g.beginPath(); g.arc(c, c, c - 16, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(c, c, c - 58, 0, Math.PI * 2); g.lineWidth = 1.5; g.stroke();
+  for (let i = 0; i < 60; i++) {
+    const a = i / 60 * Math.PI * 2, r1 = c - 18, r2 = c - (i % 5 ? 30 : 42);
+    g.lineWidth = i % 5 ? 2 : 5;
+    g.beginPath(); g.moveTo(c + Math.sin(a) * r1, c - Math.cos(a) * r1); g.lineTo(c + Math.sin(a) * r2, c - Math.cos(a) * r2); g.stroke();
+  }
+  const roman = ['XII', 'I', 'II', 'III', 'IIII', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
+  g.fillStyle = '#1a140e'; g.font = 'bold 46px Georgia, "Times New Roman", serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  roman.forEach((n, i) => { const a = i / 12 * Math.PI * 2, r = c - 92; g.fillText(n, c + Math.sin(a) * r, c - Math.cos(a) * r); });
+  g.font = 'italic 22px Georgia, serif'; g.fillText('Ashford & Sons', c, c + 70);
+  g.font = '16px Georgia, serif'; g.fillText('LONDON', c, c + 96);
+  for (let i = 0; i < 2500; i++) { g.fillStyle = `rgba(90,60,20,${rnd() * 0.06})`; g.fillRect(rnd() * w, rnd() * h, 3, 3); }
+});
+
+// Book spines (regular books get tinted by their own color)
+const spineTex = canvasTex(64, 256, (g, w, h) => {
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 600; i++) { g.fillStyle = `rgba(0,0,0,${rnd() * 0.1})`; g.fillRect(rnd() * w, rnd() * h, 2, 2); }
+  g.fillStyle = '#d8b25a';
+  for (const y of [14, 24, 230, 240]) g.fillRect(4, y, w - 8, 3);
+  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(10, 70, w - 20, 70);
+  g.fillStyle = 'rgba(216,178,90,0.8)'; g.fillRect(16, 90, w - 32, 4); g.fillRect(16, 110, w - 32, 4);
+  g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(0, 0, 3, h); g.fillRect(w - 3, 0, 3, h);
+});
+
+// ---------- Materials ----------
+const M = {
+  floor: std({ map: floorTex, roughness: 0.42, envMapIntensity: 0.5 }),
+  ceiling: std({ map: ceilTex, roughness: 0.95 }),
+  mahogany: std({ map: woodTex('#5a2a18', '#2a0f06'), roughness: 0.38, envMapIntensity: 0.55 }),
+  walnut: std({ map: woodTex('#4a2c1a', '#1e1008'), roughness: 0.5 }),
+  trim: std({ map: woodTex('#3e2416', '#1a0c05', true), roughness: 0.45, envMapIntensity: 0.5 }),
+  brass: std({ color: 0xc9a050, metalness: 1, roughness: 0.3, envMapIntensity: 1 }),
+  gold: std({ color: 0xd2a43e, metalness: 1, roughness: 0.32, envMapIntensity: 1.1 }),
+  steel: std({ map: steelTex, color: 0xb0b4ba, metalness: 0.85, roughness: 0.42, envMapIntensity: 0.9 }),
+  darkSteel: std({ map: steelTex, color: 0x4a4e54, metalness: 0.8, roughness: 0.5, envMapIntensity: 0.8 }),
+  paint: std({ color: 0xe6dfcf, roughness: 0.55 }),
+  black: std({ color: 0x141414, roughness: 0.45 }),
+  rubber: std({ color: 0x1a1a1a, roughness: 0.9 }),
+  leather: std({ color: 0x6a3420, map: leatherTex, roughness: 0.55, envMapIntensity: 0.5 }),
+  greenLeather: std({ color: 0x1f3a26, map: leatherTex, roughness: 0.6 }),
+  velvet: std({ color: 0x5e1018, roughness: 0.92, side: THREE.DoubleSide }),
+  terracotta: std({ color: 0xa8583a, roughness: 0.85 }),
+  leaf: std({ color: 0x2f5a26, roughness: 0.6, side: THREE.DoubleSide }),
+  paper: std({ color: 0xece2c8, roughness: 0.9 }),
+};
+
+// ---------- Lights ----------
+scene.add(new THREE.HemisphereLight(0xb8a890, 0x3a2a1e, 0.55));
+const ceilingLight = new THREE.SpotLight(0xffe0b0, 24, 0, 1.25, 0.85, 2);
+ceilingLight.position.set(0, RH - 0.14, 0);
+ceilingLight.target.position.set(0, 0, 0);
+ceilingLight.castShadow = true;
+ceilingLight.shadow.mapSize.set(1024, 1024);
+ceilingLight.shadow.bias = -0.0004;
+ceilingLight.shadow.normalBias = 0.02;
+ceilingLight.shadow.camera.near = 0.2;
+ceilingLight.shadow.camera.far = 7;
+scene.add(ceilingLight, ceilingLight.target);
+// Moonlight through the window (west wall)
+const moonLight = new THREE.DirectionalLight(0x8aa8ff, 0.35);
+moonLight.position.set(-8, 3.5, 0.6);
+moonLight.target.position.set(0, 0, 0.2);
+scene.add(moonLight, moonLight.target);
+
+// ---------- Walls, floor, ceiling ----------
+const floor = add(world, new THREE.PlaneGeometry(X1 - X0, Z1 - Z0), M.floor, 0, 0, 0, { cast: false });
+floor.rotation.x = -Math.PI / 2;
+const ceiling = add(world, new THREE.PlaneGeometry(X1 - X0, Z1 - Z0), M.ceiling, 0, RH, 0, { cast: false });
+ceiling.rotation.x = Math.PI / 2;
+
+// Each wall: "a" runs along the wall, "o" is how far out from it into the room
+const SIDES = {
+  N: { rot: 0, at: (a, y, o = 0) => V3(a, y, Z0 + o) },
+  S: { rot: Math.PI, at: (a, y, o = 0) => V3(a, y, Z1 - o) },
+  W: { rot: Math.PI / 2, at: (a, y, o = 0) => V3(X0 + o, y, a) },
+  E: { rot: -Math.PI / 2, at: (a, y, o = 0) => V3(X1 - o, y, a) },
+};
+const WP_TILE = 0.55, PANEL_W = 0.9, WAINSCOT_H = 0.9;
+function wallStrip(side, a0, a1, y0, y1, kind) {
+  const w = a1 - a0, h = y1 - y0;
+  const tex = (kind === 'paper' ? wallpaperTex : panelTex).clone();
+  tex.needsUpdate = true;
+  const tw = kind === 'paper' ? WP_TILE : PANEL_W, th = kind === 'paper' ? WP_TILE : WAINSCOT_H;
+  tex.repeat.set(w / tw, h / th);
+  tex.offset.set(a0 / tw, y0 / th);   // lines the pattern up across pieces
+  const mat = std({ map: tex, roughness: kind === 'paper' ? 0.85 : 0.45, envMapIntensity: kind === 'paper' ? 0.2 : 0.45 });
+  const m = add(world, new THREE.PlaneGeometry(w, h), mat, 0, 0, 0, { cast: false });
+  m.position.copy(SIDES[side].at((a0 + a1) / 2, (y0 + y1) / 2));
+  m.rotation.y = SIDES[side].rot;
+  return m;
+}
+function trim(side, a0, a1, y, h, depth, mat = M.trim) {
+  const m = add(world, B(a1 - a0, h, depth), mat);
+  m.position.copy(SIDES[side].at((a0 + a1) / 2, y, depth / 2));
+  m.rotation.y = SIDES[side].rot;
+  return m;
+}
+function wallTrims(side, a0, a1, paneling = true) {
+  if (paneling) {
+    wallStrip(side, a0, a1, 0, WAINSCOT_H, 'panel');
+    trim(side, a0, a1, WAINSCOT_H, 0.05, 0.035);      // chair rail
+    trim(side, a0, a1, 0.07, 0.14, 0.022);            // baseboard
+  }
+  trim(side, a0, a1, RH - 0.05, 0.1, 0.07);           // crown molding
+}
+// North wall (has a hidden safe behind the painting)
+const SAFE = { x0: 1.25, x1: 1.75, y0: 1.33, y1: 1.77 };
+wallTrims('N', X0, X1);
+wallStrip('N', X0, SAFE.x0, WAINSCOT_H, RH, 'paper');
+wallStrip('N', SAFE.x1, X1, WAINSCOT_H, RH, 'paper');
+wallStrip('N', SAFE.x0, SAFE.x1, WAINSCOT_H, SAFE.y0, 'paper');
+wallStrip('N', SAFE.x0, SAFE.x1, SAFE.y1, RH, 'paper');
+// South and west walls
+for (const s of ['S', 'W']) {
+  wallTrims(s, s === 'S' ? X0 : Z0, s === 'S' ? X1 : Z1);
+  wallStrip(s, s === 'S' ? X0 : Z0, s === 'S' ? X1 : Z1, WAINSCOT_H, RH, 'paper');
+}
+// East wall (has the exit door)
+for (const [a0, a1] of [[Z0, DOOR_Z0], [DOOR_Z1, Z1]]) { wallTrims('E', a0, a1); wallStrip('E', a0, a1, WAINSCOT_H, RH, 'paper'); }
+wallStrip('E', DOOR_Z0, DOOR_Z1, DOOR_H, RH, 'paper');
+trim('E', DOOR_Z0, DOOR_Z1, RH - 0.05, 0.1, 0.07);
+// Door casing
+trim('E', DOOR_Z0 - 0.12, DOOR_Z0, DOOR_H / 2, DOOR_H, 0.03);
+trim('E', DOOR_Z1, DOOR_Z1 + 0.12, DOOR_H / 2, DOOR_H, 0.03);
+trim('E', DOOR_Z0 - 0.14, DOOR_Z1 + 0.14, DOOR_H + 0.06, 0.12, 0.035);
+
+// The bright hallway on the other side of the door
+const hall = add(world, B(4, 2.4, 1.3), std({ color: 0xf4ece0, emissive: 0xfff1dc, emissiveIntensity: 2.2, roughness: 0.9, side: THREE.BackSide }), X1 + 2.01, 1.2, 0, { cast: false });
+const hallLight = new THREE.PointLight(0xfff0d8, 0, 0, 2);
+hallLight.position.set(X1 + 0.8, 2.0, 0);
+scene.add(hallLight);
+
+// ---------- Interactive things ----------
+// interact(meshes, label, act): label() says what you'd do ("Read the note") or null if nothing to do
+const handlers = [];
+function interact(objects, label, act, extra = {}) {
+  const h = { meshes: [], label, act, ...extra };
+  for (const o of [].concat(objects)) o.traverse(m => {
+    if (!m.isMesh) return;
+    m.material = Array.isArray(m.material) ? m.material.map(x => x.clone()) : m.material.clone();
+    for (const mat of [].concat(m.material)) if (mat.emissive) mat.userData.baseEmissive = mat.emissive.clone();
+    m.userData.handler = h;
+    h.meshes.push(m);
+  });
+  handlers.push(h);
+  return h;
+}
+const HL = new THREE.Color(0x3a2a12);
+function glow(h, on) {
+  for (const m of h.meshes) for (const mat of [].concat(m.material)) {
+    if (!mat.emissive || !mat.userData.baseEmissive) continue;
+    mat.emissive.copy(mat.userData.baseEmissive);
+    if (on) mat.emissive.add(HL);
+  }
+}
+// Moving parts (doors, drawers...) ease toward open when their flag turns on
+const movers = [];
+function mover(isOpen, apply, speed = 2.5) { const mv = { isOpen, apply, v: 0, speed }; movers.push(mv); return mv; }
+
+// ---------- Game state ----------
+let state = 'intro';   // intro -> play -> escaped
+let paused = false, playT = 0, doneT = 0, hintsUsed = 0, reading = false, uvOn = false;
+const inv = new Set();
+let flags = {};
+let safeCode = '', doorCode = '', clockH = 0, clockM = 0;
+const BOOK_COLORS = { RED: '#8e1c1c', BLUE: '#1f3f8e', GREEN: '#1f6a34', GOLD: '#c9a227' };
+let colorOrder = [], bookNumbers = {};
+const $ = id => document.getElementById(id);
+const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const pad2 = n => String(n).padStart(2, '0');
+
+// ---------- Sound ----------
+let audio, master;
+function ac() {
+  if (!audio) { audio = new AudioContext(); master = audio.createGain(); master.gain.value = 0.9; master.connect(audio.destination); }
+  return audio;
+}
+function tone(freq, dur, type = 'sine', vol = 0.1, endFreq = freq, delay = 0) {
+  try {
+    const a = ac(), t = a.currentTime + delay, o = a.createOscillator(), g = a.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(Math.max(1, endFreq), t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(master); o.start(t); o.stop(t + dur + 0.05);
+  } catch (e) { /* sound is optional */ }
+}
+function noise(dur, type, freq, vol, delay = 0, q = 1) {
+  try {
+    const a = ac(), len = Math.floor(a.sampleRate * dur), t = a.currentTime + delay;
+    const buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+    const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    src.buffer = buf; f.type = type; f.frequency.value = freq; f.Q.value = q; g.gain.value = vol;
+    src.connect(f).connect(g).connect(master); src.start(t);
+  } catch (e) {}
+}
+const sfx = {
+  key: () => tone(1250, 0.06, 'square', 0.04),
+  wrong: () => { tone(220, 0.25, 'square', 0.06, 200); tone(160, 0.35, 'square', 0.06, 150, 0.2); },
+  dead: () => noise(0.08, 'lowpass', 600, 0.25),
+  unlock: () => { noise(0.05, 'highpass', 3000, 0.5); noise(0.06, 'highpass', 2200, 0.5, 0.12); [784, 988, 1319].forEach((f, i) => tone(f, 0.3, 'triangle', 0.08, f, 0.15 + i * 0.09)); },
+  pickup: () => [880, 1175, 1568].forEach((f, i) => tone(f, 0.25, 'triangle', 0.07, f, i * 0.07)),
+  paper: () => { noise(0.18, 'highpass', 2500, 0.2); noise(0.12, 'highpass', 3500, 0.12, 0.15); },
+  drawer: () => { noise(0.45, 'bandpass', 260, 0.6, 0, 1.5); noise(0.06, 'lowpass', 400, 0.5, 0.42); },
+  creak: () => { tone(160, 1.1, 'sawtooth', 0.02, 110); tone(240, 0.9, 'sawtooth', 0.012, 180, 0.2); },
+  thud: () => { noise(0.15, 'lowpass', 180, 0.7); tone(70, 0.2, 'sine', 0.2, 45); },
+  click: () => noise(0.03, 'highpass', 4000, 0.4),
+  hint: () => [660, 880].forEach((f, i) => tone(f, 0.18, 'sine', 0.06, f, i * 0.1)),
+  win: () => [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.5, 'triangle', 0.1, f, i * 0.13)),
+  step: () => noise(0.06, 'lowpass', 700 + rnd() * 200, 0.1),
+};
+let ambienceStarted = false, humGain = null;
+function startAmbience() {
+  if (ambienceStarted) return;
+  ambienceStarted = true;
+  try {
+    const a = ac();
+    // Rain on the window
+    const len = a.sampleRate * 4, buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const rain = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    rain.buffer = buf; rain.loop = true; f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 0.5; g.gain.value = 0.05;
+    rain.connect(f).connect(g).connect(master); rain.start();
+    // Low room tone
+    const o = a.createOscillator(), og = a.createGain();
+    o.frequency.value = 48; og.gain.value = 0.02; o.connect(og).connect(master); o.start();
+    // Electrical hum (turned up when the power comes back)
+    const hum = a.createOscillator(); humGain = a.createGain();
+    hum.type = 'sawtooth'; hum.frequency.value = 60; humGain.gain.value = 0;
+    const hf = a.createBiquadFilter(); hf.type = 'lowpass'; hf.frequency.value = 240;
+    hum.connect(hf).connect(humGain).connect(master); hum.start();
+  } catch (e) {}
+}
+function thunder() { noise(3.5, 'lowpass', 140, 1.2, 0, 0.7); noise(2.2, 'lowpass', 300, 0.4, 0.3); }
+
+// ---------- Messages, prompts and notes (on screen for PC, floating panels for VR) ----------
+function canvasPanel(w, h, pw, ph, parent, pos, order) {
+  const tex = canvasTex(pw, ph, () => {});
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }));
+  mesh.position.copy(pos); mesh.renderOrder = order; mesh.visible = false;
+  parent.add(mesh);
+  return { mesh, tex };
+}
+const vrMsg = canvasPanel(1.3, 0.3, 1024, 236, camera, V3(0, 0.2, -1.3), 1001);
+const vrPrompt = canvasPanel(0.8, 0.08, 1024, 102, camera, V3(0, -0.3, -1.2), 1001);
+function drawPanelText(panel, text, { color = '#f1e9dc', size = 40, bg = 'rgba(16,12,9,0.88)' } = {}) {
+  redrawTex(panel.tex, (g, w, h) => {
+    g.font = `${size}px Georgia, serif`;
+    const lines = wrapText(g, text, w - 60).slice(0, 4);
+    g.fillStyle = bg; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#7a5a30'; g.lineWidth = 4; g.strokeRect(2, 2, w - 4, h - 4);
+    g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const lh = size * 1.25, y0 = h / 2 - (lines.length - 1) * lh / 2;
+    lines.forEach((l, i) => g.fillText(l, w / 2, y0 + i * lh));
+  });
+}
+let toastT = 0;
+function toast(text, secs = 4) {
+  $('toast').textContent = text;
+  $('toast').hidden = renderer.xr.isPresenting;
+  drawPanelText(vrMsg, text);
+  vrMsg.mesh.visible = renderer.xr.isPresenting;
+  toastT = secs;
+}
+let promptText = '';
+function setPrompt(text) {
+  if (text === promptText) return;
+  promptText = text;
+  $('prompt').textContent = text;
+  $('prompt').hidden = !text || renderer.xr.isPresenting || state !== 'play';
+  $('cross').classList.toggle('hot', !!text);
+  if (text) drawPanelText(vrPrompt, text, { color: '#e0b45a', size: 44, bg: 'rgba(16,12,9,0.75)' });
+  vrPrompt.mesh.visible = !!text && renderer.xr.isPresenting;
+}
+// Reading a note up close
+const readerPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.48), new THREE.MeshBasicMaterial({ depthTest: false, toneMapped: false }));
+readerPlane.position.set(0, -0.02, -0.55); readerPlane.renderOrder = 1002; readerPlane.visible = false;
+camera.add(readerPlane);
+function openReader(tex) {
+  reading = true; sfx.paper();
+  $('readerImg').src = tex.userData.canvas.toDataURL();
+  $('reader').hidden = renderer.xr.isPresenting;
+  readerPlane.material.map = tex; readerPlane.material.needsUpdate = true;
+  readerPlane.visible = renderer.xr.isPresenting;
+}
+function closeReader() { reading = false; $('reader').hidden = true; readerPlane.visible = false; sfx.paper(); }
+
+// Handwritten notes
+function drawNote(lines, signature) {
+  return (g, w, h) => {
+    g.fillStyle = '#ebdfc2'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 9000; i++) { g.fillStyle = `rgba(${rnd() < 0.5 ? '120,90,40' : '255,250,235'},${rnd() * 0.08})`; g.fillRect(rnd() * w, rnd() * h, 2, 2); }
+    for (let i = 0; i < 5; i++) {   // coffee and age stains
+      const x = rnd() * w, y = rnd() * h, s = 30 + rnd() * 110;
+      const grd = g.createRadialGradient(x, y, s * 0.6, x, y, s);
+      grd.addColorStop(0, 'rgba(150,100,40,0.03)'); grd.addColorStop(0.9, 'rgba(130,80,30,0.06)'); grd.addColorStop(1, 'rgba(130,80,30,0)');
+      g.fillStyle = grd; g.fillRect(x - s, y - s, s * 2, s * 2);
+    }
+    g.strokeStyle = 'rgba(120,90,50,0.2)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, h * 0.5); g.lineTo(w, h * 0.5 + 6); g.stroke();   // fold
+    const vig = g.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, h * 0.75);
+    vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(110,70,20,0.35)');
+    g.fillStyle = vig; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#2a2238'; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
+    g.font = '56px Caveat, "Segoe Print", cursive';
+    let y = 130;
+    for (const line of lines) {
+      for (const l of wrapText(g, line, w - 130)) { g.fillText(l, 64 + (rnd() - 0.5) * 4, y); y += 66; }
+      y += line ? 22 : 0;
+    }
+    if (signature) { g.font = '60px Caveat, "Segoe Print", cursive'; g.textAlign = 'right'; g.fillText(signature, w - 60, Math.max(y + 40, h - 90)); }
+  };
+}
+const NOTE1 = ['If you are reading this, I am sorry.', 'You are locked in my study until you prove you are clever enough to leave.',
+  'I always keep the drawer key where my guests wipe their feet.'];
+const NOTE2 = ['My safe remembers the exact moment my clock stopped.', 'Hours, then minutes. (A quarter past nine would be 0915.)',
+  'Something crooked hides something valuable.', 'P.S. Not every ink can be seen in ordinary light.'];
+const note1Tex = canvasTex(768, 1024, drawNote(NOTE1, '- Professor Ashford'));
+const note2Tex = canvasTex(768, 1024, drawNote(NOTE2, '- A.'));
+
+// ---------- Small objects ----------
+function makeKey() {
+  const k = new THREE.Group();
+  const ring = add(k, new THREE.TorusGeometry(0.014, 0.004, 8, 20), M.brass, -0.03, 0, 0);
+  ring.rotation.x = Math.PI / 2;
+  add(k, B(0.05, 0.004, 0.005), M.brass, 0.0, 0, 0);
+  add(k, B(0.006, 0.004, 0.012), M.brass, 0.018, 0, 0.007);
+  add(k, B(0.006, 0.004, 0.009), M.brass, 0.009, 0, 0.005);
+  return k;
+}
+function makeTorch() {
+  const t = new THREE.Group();
+  const body = add(t, new THREE.CylinderGeometry(0.016, 0.016, 0.13, 16), std({ color: 0x1c1c22, metalness: 0.6, roughness: 0.4 }), 0, 0, 0);
+  body.rotation.x = Math.PI / 2;
+  const head = add(t, new THREE.CylinderGeometry(0.022, 0.017, 0.035, 16), std({ color: 0x2a2a32, metalness: 0.7, roughness: 0.35 }), 0, 0, -0.08);
+  head.rotation.x = Math.PI / 2;
+  const lens = add(t, new THREE.CircleGeometry(0.019, 16), new THREE.MeshBasicMaterial({ color: 0x8a5cff }), 0, 0, -0.098);
+  lens.rotation.y = Math.PI;
+  add(t, B(0.008, 0.006, 0.02), std({ color: 0x8a5cff, emissive: 0x3a1a80, roughness: 0.4 }), 0, 0.017, 0.01);   // switch
+  t.userData.lens = lens;
+  return t;
+}
+function makeFuse() {
+  const f = new THREE.Group();
+  const glass = add(f, new THREE.CylinderGeometry(0.011, 0.011, 0.07, 16), std({ color: 0xddeeff, transparent: true, opacity: 0.35, roughness: 0.05, envMapIntensity: 1.2 }), 0, 0, 0);
+  glass.rotation.z = Math.PI / 2;
+  for (const x of [-0.042, 0.042]) { const cap = add(f, new THREE.CylinderGeometry(0.0125, 0.0125, 0.018, 16), M.brass, x, 0, 0); cap.rotation.z = Math.PI / 2; }
+  const wire = add(f, new THREE.CylinderGeometry(0.0012, 0.0012, 0.07, 6), std({ color: 0x777777, metalness: 1, roughness: 0.3 }), 0, 0, 0);
+  wire.rotation.z = Math.PI / 2;
+  return f;
+}
+
+// ---------- Window with curtains (west wall) ----------
+const WIN = { z: 0.4, y0: 0.98, y1: 2.32, w: 1.1 };
+{
+  const night = add(world, new THREE.PlaneGeometry(WIN.w, WIN.y1 - WIN.y0), new THREE.MeshBasicMaterial({ map: nightTex }), X0 + 0.005, (WIN.y0 + WIN.y1) / 2, WIN.z, { cast: false });
+  night.rotation.y = Math.PI / 2;
+  world.userData.night = night;
+  const glass = add(world, new THREE.PlaneGeometry(WIN.w, WIN.y1 - WIN.y0), std({ map: rainTex, color: 0xaabbd0, transparent: true, opacity: 0.55, roughness: 0.05, metalness: 0, envMapIntensity: 1, depthWrite: false }), X0 + 0.03, (WIN.y0 + WIN.y1) / 2, WIN.z, { cast: false, receive: false });
+  glass.rotation.y = Math.PI / 2;
+  world.userData.glass = glass;
+  const fw = 0.07, cz = WIN.z, yc = (WIN.y0 + WIN.y1) / 2, hh = WIN.y1 - WIN.y0;
+  add(world, B(0.1, fw, WIN.w + fw * 2), M.paint, X0 + 0.05, WIN.y1 + fw / 2, cz);
+  add(world, B(0.1, fw, WIN.w + fw * 2), M.paint, X0 + 0.05, WIN.y0 - fw / 2, cz);
+  add(world, B(0.1, hh, fw), M.paint, X0 + 0.05, yc, cz - WIN.w / 2 - fw / 2);
+  add(world, B(0.1, hh, fw), M.paint, X0 + 0.05, yc, cz + WIN.w / 2 + fw / 2);
+  add(world, B(0.05, hh, 0.035), M.paint, X0 + 0.04, yc, cz);          // mullions
+  add(world, B(0.05, 0.035, WIN.w), M.paint, X0 + 0.04, yc + 0.12, cz);
+  add(world, B(0.2, 0.04, WIN.w + 0.3), M.paint, X0 + 0.1, WIN.y0 - fw - 0.01, cz);   // sill
+  // curtain rod and velvet curtains with folds
+  const rod = add(world, new THREE.CylinderGeometry(0.014, 0.014, 2.1, 12), M.brass, X0 + 0.14, 2.6, cz);
+  rod.rotation.x = Math.PI / 2;
+  for (const s of [-1, 1]) {
+    const geo = new THREE.PlaneGeometry(0.55, 2.42, 28, 1);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin(p.getX(i) * 34) * 0.035 + Math.sin(p.getX(i) * 13) * 0.015);
+    geo.computeVertexNormals();
+    const c = add(world, geo, M.velvet, X0 + 0.16, 1.39, cz + s * 0.78);
+    c.rotation.y = Math.PI / 2;
+    for (const z of [-0.2, 0, 0.2]) add(world, new THREE.TorusGeometry(0.02, 0.004, 6, 12), M.brass, X0 + 0.14, 2.6, cz + s * 0.78 + z);
+  }
+  interact([night, glass], () => 'Look out the window', () => toast("It's pouring rain outside. The window is nailed shut - no way out there."));
+}
+
+// ---------- Ceiling light ----------
+{
+  add(world, new THREE.CylinderGeometry(0.16, 0.16, 0.03, 32), M.brass, 0, RH - 0.015, 0);
+  const dome = add(world, new THREE.SphereGeometry(0.2, 32, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+    std({ color: 0xfff4e0, emissive: 0xffd9a0, emissiveIntensity: 1.6, roughness: 0.3, transparent: true, opacity: 0.95 }), 0, RH - 0.03, 0, { cast: false });
+  dome.scale.y = 0.55;
+}
+
+// ---------- Rug ----------
+{
+  const rug = add(world, new THREE.PlaneGeometry(2.7, 1.9), std({ map: rugTex, roughness: 0.95, envMapIntensity: 0.1 }), 0.25, 0.004, -0.15, { cast: false });
+  rug.rotation.x = -Math.PI / 2;
+}
+
+// ---------- Bookshelf (north wall) ----------
+const specialBooks = [];   // the 4 colored books with numbers on their spines
+{
+  const g = new THREE.Group(); g.position.set(-1.0, 0, Z0 + 0.19); world.add(g);
+  const W = 1.6, H = 2.1, D = 0.36, T = 0.03;
+  for (const s of [-1, 1]) add(g, B(T, H, D), M.mahogany, s * (W / 2 - T / 2), H / 2, 0);
+  add(g, B(W + 0.06, 0.045, D + 0.04), M.mahogany, 0, H + 0.022, 0.01);
+  add(g, B(W - 0.02, H, 0.012), M.walnut, 0, H / 2, -D / 2 + 0.006);
+  add(g, B(W, 0.09, D), M.mahogany, 0, 0.045, 0);
+  const shelfYs = [0.09, 0.51, 0.93, 1.35, 1.77];
+  for (const y of shelfYs.slice(1)) add(g, B(W - 2 * T, 0.025, D - 0.02), M.mahogany, 0, y, 0.01);
+  const books = [];
+  shelfYs.forEach((y, si) => {
+    const top = y + 0.0125, room = (si < 4 ? shelfYs[si + 1] - 0.0125 : H) - top - 0.02;
+    let x = -W / 2 + T + 0.012, i = 0;
+    while (x < W / 2 - T - 0.06) {
+      if (i > 3 && rnd() < 0.05) { x += 0.08 + rnd() * 0.12; continue; }   // a gap now and then
+      const bw = 0.022 + rnd() * 0.03, bh = Math.min(room, 0.21 + rnd() * 0.15), bd = 0.17 + rnd() * 0.08;
+      books.push({ x: x + bw / 2, y: top + bh / 2, z: D / 2 - bd / 2 - 0.025, w: bw, h: bh, d: bd, shelf: si, i });
+      x += bw + 0.002; i++;
+    }
+  });
+  // Pick one book on each of 4 shelves to be a special one (bigger, with a number)
+  const chosen = new Set();
+  for (const si of [0, 1, 3, 4]) {
+    const row = books.filter(b => b.shelf === si && b.i > 4 && b.i < 30);
+    const b = row[Math.floor(rnd() * row.length)];
+    chosen.add(b);
+  }
+  const palette = ['#5a3a22', '#7a5230', '#3b2a1e', '#c8b48a', '#e2d6bc', '#2a2a2a', '#4a4038', '#6b4a3a', '#8a7a5a', '#3a3a30'];
+  const regular = books.filter(b => !chosen.has(b));
+  const inst = new THREE.InstancedMesh(B(1, 1, 1), std({ map: spineTex, roughness: 0.75 }), regular.length);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), col = new THREE.Color();
+  regular.forEach((b, i) => {
+    m4.compose(V3(b.x, b.y, b.z), q, V3(b.w, b.h, b.d));
+    inst.setMatrixAt(i, m4);
+    inst.setColorAt(i, col.set(palette[Math.floor(rnd() * palette.length)]));
+  });
+  inst.castShadow = inst.receiveShadow = true;
+  g.add(inst);
+  for (const b of chosen) {
+    const h = Math.min(0.31, b.h + 0.06), w = 0.048, d = 0.24;
+    const tex = canvasTex(96, 576, () => {});
+    const side = std({ color: 0x777777, roughness: 0.7 });
+    const front = std({ map: tex, roughness: 0.6 });
+    const mesh = add(g, B(w, h, d), [side, side, side, side, front, side], b.x, b.y - b.h / 2 + h / 2, D / 2 - d / 2 - 0.02);
+    const sb = { mesh, tex, color: 'RED' };
+    sb.handler = interact(mesh, () => `Look at the ${sb.color.toLowerCase()} book`, () =>
+      toast(`A ${sb.color.toLowerCase()} leather book. The number ${bookNumbers[sb.color]} is stamped in gold on its spine.`));
+    specialBooks.push(sb);
+  }
+}
+function drawSpecialSpine(sb) {
+  redrawTex(sb.tex, (g, w, h) => {
+    g.fillStyle = BOOK_COLORS[sb.color]; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 1500; i++) { g.fillStyle = `rgba(0,0,0,${rnd() * 0.15})`; g.fillRect(rnd() * w, rnd() * h, 2, 2); }
+    g.fillStyle = '#e4c26a';
+    for (const y of [24, 40, h - 44, h - 28]) g.fillRect(6, y, w - 12, 5);
+    g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(0, 0, 5, h); g.fillRect(w - 5, 0, 5, h);
+    g.fillStyle = sb.color === 'GOLD' ? '#3a2408' : '#f0d27a';
+    g.font = 'bold 96px Cinzel, Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(String(bookNumbers[sb.color]), w / 2, h / 2);
+  });
+  for (const i of [0, 1, 2, 3, 5]) sb.mesh.material[i].color.set(BOOK_COLORS[sb.color]);
+}
+
+// ---------- Desk with a locked drawer (south wall) ----------
+let drawer, lampLight, lampShadeMat, lampOn = true;
+{
+  const g = new THREE.Group(); g.position.set(-1.2, 0, 2.12); world.add(g);
+  const W = 1.4, D = 0.7, Ht = 0.76;
+  add(g, RB(W, 0.045, D, 0.012), M.mahogany, 0, Ht - 0.022, 0);
+  add(g, B(W - 0.22, 0.003, D - 0.22), M.greenLeather, 0, Ht + 0.0015, 0.02);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(g, B(0.055, Ht - 0.045, 0.055), M.mahogany, sx * (W / 2 - 0.05), (Ht - 0.045) / 2, sz * (D / 2 - 0.05));
+  add(g, B(W - 0.1, 0.42, 0.02), M.mahogany, 0, Ht - 0.26, D / 2 - 0.05);
+  for (const s of [-1, 1]) {
+    add(g, B(0.4, 0.14, 0.022), M.mahogany, s * 0.45, Ht - 0.115, -D / 2 + 0.02);
+    add(g, B(0.022, 0.14, D - 0.1), M.mahogany, s * (W / 2 - 0.05), Ht - 0.115, 0);
+    add(g, B(0.022, 0.14, D - 0.1), M.mahogany, s * 0.26, Ht - 0.115, 0);   // drawer runners
+  }
+  add(g, B(0.5, 0.008, D - 0.1), M.mahogany, 0, Ht - 0.19, 0);
+  // The drawer
+  drawer = new THREE.Group(); drawer.position.set(0, Ht - 0.115, 0); g.add(drawer);
+  const front = add(drawer, B(0.5, 0.135, 0.024), M.mahogany, 0, 0, -D / 2 + 0.02);
+  const knob = add(drawer, new THREE.SphereGeometry(0.016, 16, 12), M.brass, 0, -0.018, -D / 2 + 0.004);
+  const plate = add(drawer, B(0.026, 0.036, 0.004), M.brass, 0, 0.035, -D / 2 + 0.007);
+  add(drawer, B(0.005, 0.012, 0.002), M.black, 0, 0.035, -D / 2 + 0.0045);
+  add(drawer, B(0.46, 0.01, 0.5), M.walnut, 0, -0.058, -D / 2 + 0.28);
+  for (const s of [-1, 1]) add(drawer, B(0.012, 0.11, 0.5), M.walnut, s * 0.229, -0.01, -D / 2 + 0.28);
+  add(drawer, B(0.46, 0.11, 0.012), M.walnut, 0, -0.01, -D / 2 + 0.525);
+  interact([front, knob, plate], () => flags.drawerOpen ? null : inv.has('key') ? 'Unlock the drawer with the brass key' : 'Open the drawer', () => {
+    if (inv.has('key')) {
+      inv.delete('key'); flags.drawerOpen = true; updateInv();
+      sfx.click(); setTimeout(sfx.drawer, 150);
+      toast('The key turns with a click and the drawer slides open.');
+    } else { sfx.dead(); noise(0.12, 'bandpass', 900, 0.3, 0.05, 3); toast("It's locked. There's a small brass keyhole above the knob."); }
+  });
+  mover(() => flags.drawerOpen, v => { drawer.position.z = -0.36 * v; }, 3);
+  // Drawer contents: the UV flashlight and the second note
+  const torch = makeTorch(); torch.position.set(-0.1, -0.035, -D / 2 + 0.2); torch.rotation.set(0, 0.6, Math.PI / 2); drawer.add(torch);
+  interact(torch, () => flags.uvTaken ? null : 'Take the UV flashlight', () => {
+    flags.uvTaken = true; torch.visible = false; inv.add('uv'); updateInv(); sfx.pickup();
+    toast(`You got a UV flashlight! ${renderer.xr.isPresenting ? 'Press A' : 'Press F'} to switch it on and off.`, 6);
+  });
+  world.userData.drawerTorch = torch;
+  const n2 = add(drawer, new THREE.PlaneGeometry(0.15, 0.2), std({ map: note2Tex, roughness: 0.9 }), 0.09, -0.052, -D / 2 + 0.3, { cast: false });
+  n2.rotation.set(-Math.PI / 2, 0, 0.15);
+  interact(n2, () => 'Read the note', () => openReader(note2Tex));
+  // Note on the desk
+  const n1 = add(g, new THREE.PlaneGeometry(0.21, 0.28), std({ map: note1Tex, roughness: 0.9 }), 0.12, Ht + 0.004, -0.05, { cast: false });
+  n1.rotation.set(-Math.PI / 2, 0, Math.PI + 0.25);
+  interact(n1, () => 'Read the note', () => { flags.readNote1 = true; openReader(note1Tex); });
+  // Banker's lamp with a green glass shade
+  const lamp = new THREE.Group(); lamp.position.set(-0.48, Ht, 0.12); g.add(lamp);
+  add(lamp, new THREE.CylinderGeometry(0.08, 0.09, 0.025, 32), M.brass, 0, 0.0125, 0);
+  add(lamp, new THREE.CylinderGeometry(0.008, 0.008, 0.3, 12), M.brass, 0, 0.17, 0);
+  add(lamp, new THREE.CylinderGeometry(0.006, 0.006, 0.3, 8), M.brass, 0, 0.31, 0).rotation.z = Math.PI / 2;
+  lampShadeMat = std({ color: 0x0e5a2c, emissive: 0x0a3a18, emissiveIntensity: 1, roughness: 0.15, metalness: 0.1, envMapIntensity: 1.2, side: THREE.DoubleSide });
+  const shade = add(lamp, new THREE.CylinderGeometry(0.1, 0.1, 0.34, 32, 1, true, 0, Math.PI), lampShadeMat, 0, 0.3, 0);
+  shade.rotation.z = Math.PI / 2;   // half a tube, lying sideways, open side down
+  const pull = add(lamp, new THREE.CylinderGeometry(0.002, 0.002, 0.07, 6), M.brass, 0.05, 0.24, -0.04);
+  add(lamp, new THREE.SphereGeometry(0.007, 8, 6), M.brass, 0.05, 0.2, -0.04);
+  lampLight = new THREE.PointLight(0xffc27a, 3.2, 0, 2);
+  lampLight.position.set(0, 0.25, 0);
+  lamp.add(lampLight);
+  interact(lamp.children.filter(m => m !== shade), () => lampOn ? 'Switch off the lamp' : 'Switch on the lamp', () => { lampOn = !lampOn; sfx.click(); setLamp(); });
+  // a couple of old books and a fountain pen
+  add(g, RB(0.17, 0.045, 0.24, 0.006), std({ color: 0x5a1a14, roughness: 0.7 }), 0.5, Ht + 0.023, 0.12).rotation.y = 0.2;
+  add(g, RB(0.15, 0.035, 0.21, 0.006), std({ color: 0x2a3a2a, roughness: 0.7 }), 0.5, Ht + 0.063, 0.12).rotation.y = -0.1;
+  const pen = add(g, new THREE.CylinderGeometry(0.005, 0.005, 0.14, 10), M.black, -0.08, Ht + 0.006, 0.02);
+  pen.rotation.set(0, 0, Math.PI / 2); pen.rotation.y = 0.6;
+}
+function setLamp() {
+  lampLight.intensity = lampOn ? 3.2 : 0;
+  lampShadeMat.emissiveIntensity = lampOn ? 1 : 0;
+}
+
+// Chair, pulled out from the desk
+{
+  const g = new THREE.Group(); g.position.set(-0.45, 0, 1.5); g.rotation.y = 0.55; world.add(g);
+  add(g, RB(0.46, 0.05, 0.44, 0.012), M.mahogany, 0, 0.46, 0);
+  add(g, RB(0.4, 0.03, 0.38, 0.012), M.greenLeather, 0, 0.495, 0.01);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(g, B(0.04, 0.46, 0.04), M.mahogany, sx * 0.2, 0.23, sz * 0.19);
+  for (const sx of [-1, 1]) add(g, B(0.04, 0.5, 0.04), M.mahogany, sx * 0.2, 0.73, -0.19);
+  add(g, RB(0.44, 0.1, 0.03, 0.01), M.mahogany, 0, 0.93, -0.19);
+  for (const x of [-0.1, 0, 0.1]) add(g, B(0.03, 0.34, 0.015), M.mahogany, x, 0.7, -0.19);
+}
+
+// Leather armchair, floor lamp and a plant
+let floorLampLight;
+{
+  const g = new THREE.Group(); g.position.set(-2.3, 0, -1.55); g.rotation.y = 0.75; world.add(g);
+  add(g, RB(0.86, 0.32, 0.8, 0.06), M.leather, 0, 0.24, 0);
+  add(g, RB(0.6, 0.13, 0.62, 0.05), M.leather, 0, 0.46, 0.06);
+  add(g, RB(0.86, 0.66, 0.2, 0.07), M.leather, 0, 0.66, -0.3);
+  for (const s of [-1, 1]) add(g, RB(0.15, 0.3, 0.8, 0.06), M.leather, s * 0.355, 0.52, 0);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(g, new THREE.CylinderGeometry(0.025, 0.02, 0.08, 10), M.mahogany, sx * 0.36, 0.04, sz * 0.33);
+  const lamp = new THREE.Group(); lamp.position.set(-2.62, 0, -2.2); world.add(lamp);
+  add(lamp, new THREE.CylinderGeometry(0.15, 0.17, 0.03, 32), M.brass, 0, 0.015, 0);
+  add(lamp, new THREE.CylinderGeometry(0.012, 0.012, 1.5, 12), M.brass, 0, 0.78, 0);
+  add(lamp, new THREE.CylinderGeometry(0.14, 0.22, 0.26, 32, 1, true), std({ color: 0xf0e2c4, emissive: 0xffc070, emissiveIntensity: 0.55, roughness: 0.9, side: THREE.DoubleSide }), 0, 1.55, 0, { cast: false });
+  floorLampLight = new THREE.PointLight(0xffb868, 3.4, 0, 2);
+  floorLampLight.position.set(0, 1.5, 0);
+  lamp.add(floorLampLight);
+  const plant = new THREE.Group(); plant.position.set(2.5, 0, 2.12); world.add(plant);
+  add(plant, new THREE.CylinderGeometry(0.17, 0.13, 0.34, 24), M.terracotta, 0, 0.17, 0);
+  add(plant, new THREE.CylinderGeometry(0.155, 0.155, 0.01, 24), std({ color: 0x2a1c12, roughness: 1 }), 0, 0.32, 0);
+  for (let i = 0; i < 16; i++) {
+    const a = i / 16 * Math.PI * 2 + rnd() * 0.3, tilt = 0.4 + rnd() * 0.6, len = 0.28 + rnd() * 0.25;
+    const leaf = add(plant, new THREE.SphereGeometry(1, 10, 6), M.leaf, 0, 0, 0);
+    leaf.scale.set(0.05, 0.006, len / 2);
+    const dir = V3(Math.sin(a) * Math.sin(tilt), Math.cos(tilt), Math.cos(a) * Math.sin(tilt));
+    leaf.position.set(dir.x * len / 2, 0.33 + dir.y * len / 2 + 0.05, dir.z * len / 2);
+    leaf.lookAt(plant.position.x + leaf.position.x + dir.x, leaf.position.y + dir.y, plant.position.z + leaf.position.z + dir.z);
+  }
+}
+
+// ---------- Wall clock (west wall) - stopped ----------
+let hourHand, minuteHand;
+{
+  const g = new THREE.Group(); g.position.copy(SIDES.W.at(-1.45, 1.95, 0)); g.rotation.y = SIDES.W.rot; world.add(g);
+  const rim = add(g, new THREE.CylinderGeometry(0.27, 0.27, 0.06, 48), M.mahogany, 0, 0, 0.03);
+  rim.rotation.x = Math.PI / 2;
+  const bezel = add(g, new THREE.TorusGeometry(0.235, 0.014, 12, 48), M.brass, 0, 0, 0.062);
+  const face = add(g, new THREE.CircleGeometry(0.232, 48), std({ map: clockTex, roughness: 0.6 }), 0, 0, 0.061, { cast: false });
+  const handMat = std({ color: 0x111111, metalness: 0.6, roughness: 0.4 });
+  hourHand = new THREE.Group(); hourHand.position.z = 0.066; g.add(hourHand);
+  add(hourHand, B(0.016, 0.12, 0.003), handMat, 0, 0.045, 0);
+  add(hourHand, new THREE.CircleGeometry(0.018, 4), handMat, 0, 0.1, 0.002).rotation.z = Math.PI / 4;
+  minuteHand = new THREE.Group(); minuteHand.position.z = 0.07; g.add(minuteHand);
+  add(minuteHand, B(0.01, 0.19, 0.003), handMat, 0, 0.075, 0);
+  const sec = add(g, B(0.003, 0.2, 0.002), std({ color: 0x8a1010, roughness: 0.4 }), 0, -0.06, 0.073);
+  sec.rotation.z = 2.6; sec.position.set(-Math.sin(2.6) * 0.06, Math.cos(2.6) * 0.06, 0.073);   // stuck, not ticking
+  add(g, new THREE.CylinderGeometry(0.012, 0.012, 0.012, 16), M.brass, 0, 0, 0.074).rotation.x = Math.PI / 2;
+  const glassC = add(g, new THREE.CircleGeometry(0.235, 48), std({ color: 0xffffff, transparent: true, opacity: 0.08, roughness: 0.02, envMapIntensity: 1.5, depthWrite: false }), 0, 0, 0.08, { cast: false, receive: false });
+  interact(g, () => 'Look at the clock', () => toast("The clock isn't ticking. It stopped and nobody ever wound it again."));
+}
+function setClock() {
+  hourHand.rotation.z = -((clockH % 12) + clockM / 60) / 12 * Math.PI * 2;
+  minuteHand.rotation.z = -(clockM / 60) * Math.PI * 2;
+}
+
+// ---------- Painting with a safe behind it (north wall) ----------
+let safeKeypad;
+{
+  // Steel-lined hole in the wall
+  const cx = (SAFE.x0 + SAFE.x1) / 2, cy = (SAFE.y0 + SAFE.y1) / 2, sw = SAFE.x1 - SAFE.x0, sh = SAFE.y1 - SAFE.y0, depth = 0.28;
+  add(world, new THREE.PlaneGeometry(sw, sh), M.darkSteel, cx, cy, Z0 - depth, { cast: false });
+  const top = add(world, new THREE.PlaneGeometry(sw, depth), M.darkSteel, cx, SAFE.y1, Z0 - depth / 2, { cast: false }); top.rotation.x = Math.PI / 2;
+  const bot = add(world, new THREE.PlaneGeometry(sw, depth), M.darkSteel, cx, SAFE.y0, Z0 - depth / 2, { cast: false }); bot.rotation.x = -Math.PI / 2;
+  const lft = add(world, new THREE.PlaneGeometry(depth, sh), M.darkSteel, SAFE.x0, cy, Z0 - depth / 2, { cast: false }); lft.rotation.y = Math.PI / 2;
+  const rgt = add(world, new THREE.PlaneGeometry(depth, sh), M.darkSteel, SAFE.x1, cy, Z0 - depth / 2, { cast: false }); rgt.rotation.y = -Math.PI / 2;
+  add(world, B(sw + 0.08, 0.04, 0.012), M.steel, cx, SAFE.y1 + 0.02, Z0 + 0.006);
+  add(world, B(sw + 0.08, 0.04, 0.012), M.steel, cx, SAFE.y0 - 0.02, Z0 + 0.006);
+  add(world, B(0.04, sh, 0.012), M.steel, SAFE.x0 - 0.02, cy, Z0 + 0.006);
+  add(world, B(0.04, sh, 0.012), M.steel, SAFE.x1 + 0.02, cy, Z0 + 0.006);
+  // The safe door, hinged on the left
+  const hinge = new THREE.Group(); hinge.position.set(SAFE.x0, cy, Z0); world.add(hinge);
+  add(hinge, B(sw - 0.004, sh - 0.004, 0.05), M.steel, sw / 2, 0, -0.02);
+  const wheel = add(hinge, new THREE.TorusGeometry(0.04, 0.007, 10, 24), M.steel, 0.12, 0, 0.012);
+  for (let i = 0; i < 3; i++) { const sp = add(hinge, B(0.08, 0.008, 0.008), M.steel, 0.12, 0, 0.012); sp.rotation.z = i * Math.PI / 3; }
+  add(hinge, new THREE.CylinderGeometry(0.012, 0.012, 0.02, 12), M.steel, 0.12, 0, 0.01).rotation.x = Math.PI / 2;
+  safeKeypad = makeKeypad(hinge, V3(0.35, 0.02, 0.005), 0, {
+    powered: () => true, code: () => safeCode, deadMsg: '',
+    onOpen: () => { flags.safeOpen = true; setTimeout(() => toast('Click! The safe door swings open.'), 400); setTimeout(sfx.creak, 300); },
+  });
+  mover(() => flags.safeOpen, v => { hinge.rotation.y = -1.75 * v; }, 1.6);
+  // Inside the safe: a fuse and some old papers
+  const fuse = makeFuse(); fuse.position.set(cx + 0.05, SAFE.y0 + 0.014, Z0 - 0.14); fuse.rotation.y = 0.4; world.add(fuse);
+  interact(fuse, () => flags.fuseTaken ? null : 'Take the fuse', () => {
+    flags.fuseTaken = true; fuse.visible = false; inv.add('fuse'); updateInv(); sfx.pickup();
+    toast('You got a glass fuse. Something in this room must be missing one...');
+  });
+  world.userData.safeFuse = fuse;
+  const papers = add(world, B(0.2, 0.02, 0.15), M.paper, cx - 0.12, SAFE.y0 + 0.01, Z0 - 0.17);
+  papers.rotation.y = -0.15;
+
+  // The painting, hanging a little crooked, hinged on its left edge
+  const pHinge = new THREE.Group(); pHinge.position.set(1.05, 1.55, Z0 + 0.062); world.add(pHinge);
+  const tilt = new THREE.Group(); pHinge.add(tilt);
+  const pw = 0.9, ph = 0.7, fw = 0.065;
+  const parts = [];
+  parts.push(add(tilt, B(pw, fw, 0.05), M.gold, pw / 2, ph / 2 - fw / 2, 0));
+  parts.push(add(tilt, B(pw, fw, 0.05), M.gold, pw / 2, -ph / 2 + fw / 2, 0));
+  parts.push(add(tilt, B(fw, ph - 2 * fw, 0.05), M.gold, fw / 2, 0, 0));
+  parts.push(add(tilt, B(fw, ph - 2 * fw, 0.05), M.gold, pw - fw / 2, 0, 0));
+  const inner = std({ color: 0x5a4018, metalness: 0.8, roughness: 0.4, envMapIntensity: 0.8 });
+  parts.push(add(tilt, B(pw - 2 * fw + 0.02, 0.015, 0.03), inner, pw / 2, ph / 2 - fw, 0.004));
+  parts.push(add(tilt, B(pw - 2 * fw + 0.02, 0.015, 0.03), inner, pw / 2, -ph / 2 + fw, 0.004));
+  parts.push(add(tilt, new THREE.PlaneGeometry(pw - 2 * fw, ph - 2 * fw), std({ map: paintingTex, roughness: 0.7, envMapIntensity: 0.25 }), pw / 2, 0, -0.008));
+  parts.push(add(tilt, B(pw - 0.02, ph - 0.02, 0.008), M.walnut, pw / 2, 0, -0.021));
+  interact(parts, () => flags.paintingOpen ? null : 'Straighten the crooked painting', () => {
+    flags.paintingOpen = true; sfx.creak();
+    setTimeout(() => toast("It's on a hinge! It swings away from the wall... there's a safe behind it!"), 500);
+  });
+  mover(() => flags.paintingOpen, v => { tilt.rotation.z = -0.055 * (1 - Math.min(1, v * 3)); pHinge.rotation.y = -1.7 * v; }, 1.4);
+}
+
+// ---------- Keypads ----------
+function makeKeypad(parent, pos, rotY, opts) {
+  const g = new THREE.Group(); g.position.copy(pos); g.rotation.y = rotY; parent.add(g);
+  add(g, RB(0.12, 0.19, 0.014, 0.006), M.steel, 0, 0, 0.007);
+  add(g, B(0.102, 0.038, 0.004), M.black, 0, 0.064, 0.015);
+  const lcd = canvasTex(256, 96, () => {});
+  add(g, new THREE.PlaneGeometry(0.092, 0.03), new THREE.MeshBasicMaterial({ map: lcd, toneMapped: false }), 0, 0.064, 0.0173, { cast: false });
+  const led = add(g, new THREE.SphereGeometry(0.004, 8, 6), new THREE.MeshBasicMaterial({ color: 0x330000 }), 0.045, 0.087, 0.014, { cast: false });
+  const kp = { entry: '', status: 'idle', statusT: 0, lcd, led, done: false, buttons: [], ...opts };
+  const labels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'];
+  kp.labels = labels;
+  const sideMat = std({ color: 0x2b2d31, roughness: 0.5 });
+  labels.forEach((L, i) => {
+    const col = i % 3, row = Math.floor(i / 3);
+    const tex = canvasTex(64, 56, (c, w, h) => {
+      const grd = c.createLinearGradient(0, 0, 0, h); grd.addColorStop(0, '#3e4146'); grd.addColorStop(1, '#25272b');
+      c.fillStyle = grd; c.fillRect(0, 0, w, h);
+      c.fillStyle = L === 'OK' ? '#8dff9a' : L === 'C' ? '#ff9a8d' : '#f2f2f2';
+      c.font = `bold ${L.length > 1 ? 26 : 34}px Arial, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(L, w / 2, h / 2 + 2);
+    });
+    const front = std({ map: tex, roughness: 0.5 });
+    const b = add(g, B(0.028, 0.024, 0.008), [sideMat, sideMat, sideMat, sideMat, front, sideMat], (col - 1) * 0.034, 0.02 - row * 0.03, 0.018);
+    b.userData.baseZ = 0.018;
+    kp.buttons.push(b);
+    interact(b, () => kp.done ? null : `Press ${L}`, () => pressKey(kp, L), { keypad: kp });
+  });
+  drawLCD(kp);
+  return kp;
+}
+function drawLCD(kp) {
+  const on = kp.powered();
+  kp.led.material.color.set(!on ? 0x220000 : kp.done ? 0x30ff60 : 0xff2a20);
+  redrawTex(kp.lcd, (g, w, h) => {
+    g.fillStyle = on ? '#0a2012' : '#050605'; g.fillRect(0, 0, w, h);
+    if (!on) return;
+    let text, color = '#7dffa0';
+    if (kp.status === 'err') { text = 'ERROR'; color = '#ff5a4a'; }
+    else if (kp.status === 'ok') text = 'OPEN';
+    else text = (kp.entry + '____').slice(0, 4).split('').join(' ');
+    g.font = 'bold 56px "Courier New", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.shadowColor = color; g.shadowBlur = 14; g.fillStyle = color; g.fillText(text, w / 2, h / 2 + 3);
+  });
+}
+function pressKey(kp, L) {
+  if (state !== 'play' || kp.done) return;
+  const b = kp.buttons[kp.labels.indexOf(L)];
+  if (b) { b.position.z = b.userData.baseZ - 0.004; b.userData.pressT = 0.12; }
+  if (!kp.powered()) { sfx.dead(); toast(kp.deadMsg); return; }
+  if (kp.status === 'err') { kp.status = 'idle'; kp.entry = ''; }
+  sfx.key();
+  if (L === 'C') kp.entry = '';
+  else if (L === 'OK') { if (kp.entry.length) submitCode(kp); }
+  else if (kp.entry.length < 4) { kp.entry += L; if (kp.entry.length === 4) submitCode(kp); }
+  drawLCD(kp);
+}
+function submitCode(kp) {
+  if (kp.entry === kp.code()) { kp.status = 'ok'; kp.done = true; sfx.unlock(); kp.onOpen(); }
+  else { kp.status = 'err'; kp.statusT = 1.3; kp.entry = ''; setTimeout(sfx.wrong, 60); }
+  drawLCD(kp);
+}
+
+// ---------- Exit door, keypad and fuse box (east wall) ----------
+let doorKeypad, fuseLED;
+{
+  const hinge = new THREE.Group(); hinge.position.set(X1 + 0.02, 0, DOOR_Z0); world.add(hinge);
+  const doorTex = canvasTex(512, 1100, (g, w, h) => {
+    drawWoodGrain(g, w, h, '#4e2616', '#22100a', 180);
+    const panel = (x, y, pw, ph) => {
+      g.strokeStyle = 'rgba(255,220,180,0.16)'; g.lineWidth = 10;
+      g.beginPath(); g.moveTo(x, y + ph); g.lineTo(x, y); g.lineTo(x + pw, y); g.stroke();
+      g.strokeStyle = 'rgba(0,0,0,0.55)';
+      g.beginPath(); g.moveTo(x + pw, y); g.lineTo(x + pw, y + ph); g.lineTo(x, y + ph); g.stroke();
+      g.strokeStyle = 'rgba(0,0,0,0.3)'; g.lineWidth = 4; g.strokeRect(x + 26, y + 26, pw - 52, ph - 52);
+    };
+    panel(60, 60, 175, 430); panel(277, 60, 175, 430); panel(60, 560, 175, 480); panel(277, 560, 175, 480);
+  });
+  const face = std({ map: doorTex, roughness: 0.4, envMapIntensity: 0.5 });
+  const edge = M.mahogany;
+  const leaf = add(hinge, B(0.05, DOOR_H - 0.012, DOOR_Z1 - DOOR_Z0 - 0.006), [face, face, edge, edge, edge, edge], 0, DOOR_H / 2 + 0.006, (DOOR_Z1 - DOOR_Z0) / 2);
+  const knobs = [];
+  for (const sx of [-1, 1]) {
+    knobs.push(add(hinge, new THREE.SphereGeometry(0.03, 20, 14), M.brass, sx * 0.065, 1.0, 0.88));
+    add(hinge, new THREE.CylinderGeometry(0.009, 0.009, 0.06, 10), M.brass, sx * 0.045, 1.0, 0.88).rotation.z = Math.PI / 2;
+    add(hinge, B(0.006, 0.16, 0.05), M.brass, sx * 0.028, 0.96, 0.88);
+  }
+  for (const y of [0.25, 1.9]) add(hinge, new THREE.CylinderGeometry(0.012, 0.012, 0.1, 10), M.brass, -0.03, y, 0.005);
+  interact([leaf, ...knobs], () => flags.doorOpen ? null : 'Try the door', () => {
+    sfx.thud(); noise(0.1, 'bandpass', 1200, 0.3, 0.1, 4);
+    toast(flags.fuseIn ? "Still locked. The keypad wants a 4-digit code." : "Locked tight. The keypad beside the door controls the lock - but it's dark.");
+  });
+  mover(() => flags.doorOpen, v => { hinge.rotation.y = 1.45 * v; hallLight.intensity = 9 * v; }, 1.1);
+
+  doorKeypad = makeKeypad(world, SIDES.E.at(0.82, 1.3, 0.002), SIDES.E.rot, {
+    powered: () => !!flags.fuseIn, code: () => doorCode,
+    deadMsg: 'The keypad is dead. No lights, no beeps. Is there a power problem?',
+    onOpen: () => { flags.doorOpen = true; setTimeout(sfx.creak, 400); setTimeout(() => toast('The lock clunks open and the door swings wide... RUN!'), 300); },
+  });
+
+  // Fuse box
+  const fb = new THREE.Group(); fb.position.copy(SIDES.E.at(-1.25, 1.45, 0)); fb.rotation.y = SIDES.E.rot; world.add(fb);
+  const boxMat = std({ color: 0x6e7468, metalness: 0.6, roughness: 0.5, map: steelTex });
+  add(fb, B(0.34, 0.44, 0.012), boxMat, 0, 0, 0.006);
+  for (const s of [-1, 1]) { add(fb, B(0.012, 0.44, 0.1), boxMat, s * 0.164, 0, 0.05); add(fb, B(0.34, 0.012, 0.1), boxMat, 0, s * 0.214, 0.05); }
+  add(fb, B(0.3, 0.4, 0.004), std({ color: 0x2a2c2a, roughness: 0.8 }), 0, 0, 0.014);
+  // breakers (decoration)
+  for (let i = 0; i < 4; i++) { add(fb, B(0.04, 0.07, 0.03), std({ color: 0x111111, roughness: 0.5 }), -0.09 + i * 0.06, 0.12, 0.03); add(fb, B(0.012, 0.025, 0.02), std({ color: 0xd0d0d0 }), -0.09 + i * 0.06, 0.13, 0.05); }
+  // fuse socket
+  const socket = new THREE.Group(); socket.position.set(0, -0.06, 0.03); fb.add(socket);
+  const sockParts = [add(socket, B(0.15, 0.05, 0.02), std({ color: 0x1a1a1a, roughness: 0.6 }), 0, 0, 0)];
+  for (const x of [-0.045, 0.045]) sockParts.push(add(socket, B(0.014, 0.03, 0.02), M.brass, x, 0, 0.015));
+  const installed = makeFuse(); installed.position.set(0, 0, 0.026); installed.visible = false; socket.add(installed);
+  world.userData.installedFuse = installed;
+  fuseLED = add(fb, new THREE.SphereGeometry(0.008, 10, 8), new THREE.MeshBasicMaterial({ color: 0x440000 }), 0.1, -0.15, 0.025, { cast: false });
+  const lbl = canvasTex(256, 64, (g, w, h) => { g.fillStyle = '#e8e2c8'; g.fillRect(0, 0, w, h); g.fillStyle = '#222'; g.font = 'bold 30px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('MAIN - DOOR LOCK', w / 2, h / 2); });
+  add(fb, new THREE.PlaneGeometry(0.13, 0.032), std({ map: lbl, roughness: 0.8 }), 0, -0.12, 0.017, { cast: false });
+  interact(sockParts, () => flags.fuseIn ? null : (inv.has('fuse') ? 'Put the fuse in' : 'Look at the empty fuse socket'), () => {
+    if (!inv.has('fuse')) { toast('An empty fuse socket marked DOOR LOCK. The fuse must be somewhere in this room.'); return; }
+    inv.delete('fuse'); updateInv(); flags.fuseIn = true; installed.visible = true;
+    sfx.click(); setTimeout(() => { tone(90, 0.6, 'sawtooth', 0.05, 60); if (humGain) humGain.gain.value = 0.012; }, 150);
+    fuseLED.material.color.set(0x30ff60);
+    drawLCD(doorKeypad);
+    toast('The fuse clicks in. The keypad by the door lights up!');
+  });
+  // fuse box door with a warning sticker
+  const fdHinge = new THREE.Group(); fdHinge.position.set(-0.17, 0, 0.1); fb.add(fdHinge);
+  const warn = canvasTex(256, 320, (g, w, h) => {
+    g.drawImage(steelTex.userData.canvas, 0, 0, w, h);
+    g.fillStyle = 'rgba(110,116,104,0.75)'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#f2c40f'; g.beginPath(); g.moveTo(w / 2, 50); g.lineTo(w / 2 + 80, 190); g.lineTo(w / 2 - 80, 190); g.closePath(); g.fill();
+    g.strokeStyle = '#111'; g.lineWidth = 8; g.stroke();
+    g.fillStyle = '#111'; g.beginPath(); g.moveTo(w / 2 + 8, 85); g.lineTo(w / 2 - 22, 145); g.lineTo(w / 2, 145); g.lineTo(w / 2 - 10, 178); g.lineTo(w / 2 + 24, 125); g.lineTo(w / 2 + 2, 125); g.closePath(); g.fill();
+    g.font = 'bold 30px Arial'; g.textAlign = 'center'; g.fillText('DANGER', w / 2, 240); g.font = 'bold 20px Arial'; g.fillText('HIGH VOLTAGE', w / 2, 272);
+  });
+  const fdMat = std({ map: warn, metalness: 0.5, roughness: 0.5 });
+  const fdoor = add(fdHinge, B(0.34, 0.44, 0.012), [boxMat, boxMat, boxMat, boxMat, fdMat, boxMat], 0.17, 0, 0.006);
+  const latch = add(fdHinge, B(0.015, 0.05, 0.02), M.steel, 0.31, 0, 0.018);
+  interact([fdoor, latch], () => flags.fuseBoxOpen ? null : 'Open the fuse box', () => { flags.fuseBoxOpen = true; sfx.click(); noise(0.3, 'bandpass', 700, 0.25, 0.05, 2); });
+  mover(() => flags.fuseBoxOpen, v => { fdHinge.rotation.y = -1.9 * v; }, 3);
+  // Doormat with the key under it
+  const key = makeKey(); key.position.set(2.46, 0.006, 0.08); key.rotation.y = 0.7; world.add(key);
+  interact(key, () => flags.keyTaken ? null : 'Pick up the brass key', () => {
+    flags.keyTaken = true; key.visible = false; inv.add('key'); updateInv(); sfx.pickup();
+    toast('You found a small brass key!');
+  });
+  world.userData.key = key;
+  const matG = new THREE.Group(); matG.position.set(2.45, 0.011, 0); matG.rotation.y = -Math.PI / 2; world.add(matG);
+  const mat = add(matG, B(0.85, 0.016, 0.52), [std({ color: 0x5a3e22, roughness: 1 }), std({ color: 0x5a3e22, roughness: 1 }), std({ map: doormatTex, roughness: 1, envMapIntensity: 0 }), std({ color: 0x2a1c10, roughness: 1 }), std({ color: 0x5a3e22, roughness: 1 }), std({ color: 0x5a3e22, roughness: 1 })], 0, 0, 0, { cast: false });
+  interact(mat, () => flags.matLifted ? null : 'Lift the doormat', () => { flags.matLifted = true; noise(0.4, 'lowpass', 900, 0.3); });
+  mover(() => flags.matLifted, v => { matG.position.z = 0.62 * v; matG.position.x = 2.45 - 0.1 * v; matG.rotation.y = -Math.PI / 2 + 0.35 * v; }, 3);
+}
+
+// ---------- Invisible UV ink ----------
+const uvMarks = [];
+function uvMark(w, h, pos, rotY, pw, ph) {
+  const tex = canvasTex(pw, ph, () => {});
+  const m = add(world, new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), 0, 0, 0, { cast: false, receive: false });
+  m.position.copy(pos); m.rotation.y = rotY; m.userData.noRay = true;
+  const mark = { mesh: m, tex, wp: pos.clone() };
+  uvMarks.push(mark);
+  return mark;
+}
+function uvInk(g, text, x, y, size) {
+  g.font = `${size}px Caveat, "Segoe Print", cursive`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.shadowColor = '#7affd8'; g.shadowBlur = 18; g.fillStyle = '#c8fff0'; g.fillText(text, x, y);
+  g.shadowBlur = 0; g.fillText(text, x, y);
+}
+const uvTitle = uvMark(1.5, 0.22, SIDES.N.at(-1.0, 2.52, 0.004), 0, 1024, 150);
+const uvWords = [0, 1, 2, 3].map(i => uvMark(0.36, 0.17, SIDES.N.at(-1.6 + i * 0.4, 2.3, 0.004), 0, 256, 120));
+const uvHand = uvMark(0.22, 0.26, SIDES.W.at(-0.55, 1.35, 0.004), SIDES.W.rot, 256, 300);
+const uvArrow = uvMark(0.3, 0.16, SIDES.N.at(0.75, 1.55, 0.004), 0, 256, 140);
+redrawTex(uvHand.tex, (g, w, h) => {   // a ghostly handprint on the wall
+  g.fillStyle = 'rgba(190,255,235,0.55)'; g.shadowColor = '#7affd8'; g.shadowBlur = 16;
+  g.beginPath(); g.ellipse(128, 200, 62, 72, 0, 0, Math.PI * 2); g.fill();
+  [[-50, 120, -0.35], [-22, 95, -0.1], [10, 90, 0.05], [42, 100, 0.2], [80, 175, 0.9]].forEach(([dx, dy, a]) => { g.save(); g.translate(128 + dx, dy); g.rotate(a); g.beginPath(); g.ellipse(0, -30, 13, 42, 0, 0, Math.PI * 2); g.fill(); g.restore(); });
+});
+redrawTex(uvArrow.tex, (g, w, h) => { uvInk(g, 'look closer →', w / 2, h / 2, 52); });
+function drawUVText() {
+  redrawTex(uvTitle.tex, (g, w, h) => {
+    const text = 'The spines hold the code. Read them in this order:';
+    let size = 64;
+    do { g.font = `${size}px Caveat, "Segoe Print", cursive`; size -= 2; } while (g.measureText(text).width > w - 60 && size > 20);
+    uvInk(g, text, w / 2, h / 2, size + 2);
+  });
+  uvWords.forEach((m, i) => redrawTex(m.tex, (g, w, h) => uvInk(g, `${i + 1}. ${colorOrder[i]}`, w / 2, h / 2, 64)));
+}
+
+// UV flashlight (on your head on PC, in your right hand in VR)
+const uvLight = new THREE.SpotLight(0x7a3cff, 0, 7, 0.32, 0.45, 2);
+const uvTarget = new THREE.Object3D();
+uvLight.target = uvTarget;
+const pcTorch = makeTorch(); pcTorch.position.set(0.26, -0.26, -0.5); pcTorch.rotation.set(0.12, 0.12, 0); pcTorch.visible = false;
+camera.add(pcTorch);
+function holdUVOnCamera() { camera.add(uvLight, uvTarget); uvLight.position.set(0.2, -0.18, -0.4); uvTarget.position.set(0, -0.1, -5); }
+holdUVOnCamera();
+function toggleUV() {
+  if (!inv.has('uv')) { toast("You don't have anything like that yet."); return; }
+  uvOn = !uvOn; sfx.click(); updateInv();
+}
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
+function updateUV() {
+  const on = uvOn && inv.has('uv') && state !== 'intro';
+  uvLight.intensity = on ? 7 : 0;
+  pcTorch.userData.lens.material.color.set(on ? 0xc8a0ff : 0x3a2a5a);
+  vrTorch.userData.lens.material.color.set(on ? 0xc8a0ff : 0x3a2a5a);
+  uvLight.getWorldPosition(tmpA);
+  uvTarget.getWorldPosition(tmpB);
+  tmpB.sub(tmpA).normalize();
+  for (const m of uvMarks) {
+    if (!on) { m.mesh.material.opacity = 0; continue; }
+    tmpC.copy(m.wp).sub(tmpA);
+    const d = tmpC.length();
+    const f = smooth(0.94, 0.985, tmpC.normalize().dot(tmpB)) * (1 - smooth(4, 5.5, d));
+    m.mesh.material.opacity = f;
+  }
+}
+
+// ---------- Player ----------
+const R = 0.25;   // how wide you are
+const player = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, walkPhase: 0 };
+const solids = [
+  [-1.95, -0.45, 1.75, 2.5],   // desk
+  [-0.75, -0.15, 1.2, 1.8],    // chair
+  [-1.82, -0.18, -2.5, -2.12], // bookshelf
+  [-2.85, -1.85, -2.15, -1.0], // armchair
+  [-2.85, -2.4, -2.45, -1.95], // floor lamp
+  [2.3, 2.75, 1.9, 2.5],       // plant
+];
+function blockPlayer(p) {
+  const doorway = flags.doorOpen && Math.abs(p.z) < DOOR_Z1 - R;
+  if (p.x > X1 - R && !doorway) p.x = X1 - R;
+  if (p.x > X1 - R) { p.z = THREE.MathUtils.clamp(p.z, DOOR_Z0 + R, DOOR_Z1 - R); p.x = Math.min(p.x, X1 + 3.5); }
+  else p.z = THREE.MathUtils.clamp(p.z, Z0 + R, Z1 - R);
+  p.x = Math.max(p.x, X0 + R);
+  for (const [x0, x1, z0, z1] of solids) {
+    const cx = THREE.MathUtils.clamp(p.x, x0, x1), cz = THREE.MathUtils.clamp(p.z, z0, z1);
+    let dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz);
+    if (d >= R) continue;
+    if (d > 1e-5) { p.x = cx + dx / d * R; p.z = cz + dz / d * R; }
+    else {   // inside the box: push out the nearest side
+      const opts = [[p.x - x0, -1, 0], [x1 - p.x, 1, 0], [p.z - z0, 0, -1], [z1 - p.z, 0, 1]].sort((a, b) => a[0] - b[0])[0];
+      if (opts[1]) p.x = opts[1] < 0 ? x0 - R : x1 + R; else p.z = opts[2] < 0 ? z0 - R : z1 + R;
+    }
+  }
+}
+
+// ---------- HUD and inventory ----------
+const ITEM_NAMES = { key: '🔑 BRASS KEY', uv: '🔦 UV LIGHT', fuse: '⚡ FUSE' };
+const wrist = canvasPanel(0.15, 0.075, 512, 256, scene, V3(), 1000);
+wrist.mesh.material.depthTest = true;
+function updateInv() {
+  $('inv').innerHTML = '';
+  for (const it of inv) {
+    const s = document.createElement('span');
+    s.textContent = it === 'uv' ? `${ITEM_NAMES.uv} (F): ${uvOn ? 'ON' : 'OFF'}` : ITEM_NAMES[it];
+    if (it === 'uv' && uvOn) s.className = 'on';
+    $('inv').appendChild(s);
+  }
+  pcTorch.visible = inv.has('uv') && !renderer.xr.isPresenting;
+  vrTorch.visible = inv.has('uv');
+  drawWrist();
+}
+function drawWrist() {
+  redrawTex(wrist.tex, (g, w, h) => {
+    g.fillStyle = 'rgba(16,12,9,0.88)'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#7a5a30'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6);
+    g.fillStyle = '#e0b45a'; g.font = 'bold 44px Georgia, serif'; g.textAlign = 'center';
+    g.fillText(`TIME ${fmt(playT)}`, w / 2, 62);
+    g.fillStyle = '#f1e9dc'; g.font = '30px Georgia, serif';
+    const items = [...inv].map(i => i === 'uv' ? `UV light (A): ${uvOn ? 'ON' : 'OFF'}` : i === 'key' ? 'Brass key' : 'Fuse');
+    (items.length ? items : ['(nothing yet)']).forEach((t, i) => g.fillText(t, w / 2, 120 + i * 40));
+    g.fillStyle = '#b5a690'; g.font = '24px Georgia, serif'; g.fillText('B: hint · Y: pause', w / 2, h - 18);
+  });
+}
+function updateHud() {
+  $('time').textContent = fmt(playT);
+  $('hintCount').textContent = hintsUsed;
+}
+
+// ---------- Hints ----------
+let hintKey = '', hintIdx = 0;
+function hintList() {
+  if (!flags.keyTaken) return flags.readNote1
+    ? ['Where do guests wipe their feet?', 'Look at the doormat in front of the exit door.', 'Lift the doormat - the brass key is under it.']
+    : ['Start with the note lying on the desk.', 'Read the note on the desk, then think about where guests wipe their feet.', 'Lift the doormat in front of the exit door - the brass key is under it.'];
+  if (!flags.drawerOpen) return ['You have a brass key. What in here is locked?', 'Use the key on the desk drawer.'];
+  if (!flags.uvTaken) return ['There is something useful inside the open drawer.', 'Take the UV flashlight from the drawer (and read the note in there).'];
+  if (!flags.paintingOpen) return ['Read the note in the drawer.', '"Something crooked hides something valuable." One thing on the walls is hanging crooked...', 'Click the painting next to the bookshelf to swing it open.'];
+  if (!flags.safeOpen) return ['The note says the safe remembers when the clock stopped.', 'Look at the clock on the wall near the window. Write the time as 4 digits: hours, then minutes.', `The clock stopped at ${clockH}:${pad2(clockM)}. Type ${safeCode} on the safe keypad.`];
+  if (!flags.fuseTaken) return ['Take what is inside the safe.'];
+  if (!flags.fuseIn) return ['The keypad by the door has no power. Something electrical needs that fuse.', 'Open the gray fuse box on the wall near the door and put the fuse in its socket.'];
+  if (!flags.doorOpen) return [`"Not every ink can be seen in ordinary light." Turn on your UV flashlight (${renderer.xr.isPresenting ? 'A button' : 'F key'}) and look around the walls.`,
+    'Shine the UV light on the wall above the bookshelf.', 'Each colored book on the shelf has a number on its spine. Type the numbers in the order written on the wall.', `The door code is ${doorCode}.`];
+  return ['The door is open. Walk out!'];
+}
+function useHint() {
+  if (state !== 'play') return;
+  const list = hintList();
+  if (list[0] !== hintKey) { hintKey = list[0]; hintIdx = 0; }
+  const text = list[Math.min(hintIdx, list.length - 1)];
+  if (hintIdx < list.length) { hintsUsed++; hintIdx++; }
+  updateHud(); sfx.hint();
+  toast('HINT: ' + text, 7);
+}
+
+// ---------- New game ----------
+function randomizePuzzles() {
+  do { clockH = 1 + Math.floor(rnd() * 12); clockM = 5 * (1 + Math.floor(rnd() * 11)); } while (clockH === 9 && clockM === 15);
+  safeCode = pad2(clockH) + pad2(clockM);
+  setClock();
+  colorOrder = Object.keys(BOOK_COLORS).sort(() => rnd() - 0.5);
+  const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => rnd() - 0.5);
+  Object.keys(BOOK_COLORS).forEach((c, i) => { bookNumbers[c] = digits[i]; });
+  doorCode = colorOrder.map(c => bookNumbers[c]).join('');
+  const slotColors = Object.keys(BOOK_COLORS).sort(() => rnd() - 0.5);
+  specialBooks.forEach((sb, i) => { sb.color = slotColors[i]; drawSpecialSpine(sb); });
+  drawUVText();
+}
+function resetRoom() {
+  flags = { readNote1: false, matLifted: false, keyTaken: false, drawerOpen: false, uvTaken: false, paintingOpen: false,
+    safeOpen: false, fuseTaken: false, fuseBoxOpen: false, fuseIn: false, doorOpen: false };
+  for (const mv of movers) { mv.v = 0; mv.apply(0); }
+  shadowFrames = 3;
+  world.userData.key.visible = true;
+  world.userData.drawerTorch.visible = true;
+  world.userData.safeFuse.visible = true;
+  world.userData.installedFuse.visible = false;
+  fuseLED.material.color.set(0x440000);
+  if (humGain) humGain.gain.value = 0;
+  for (const kp of [safeKeypad, doorKeypad]) { kp.entry = ''; kp.status = 'idle'; kp.done = false; drawLCD(kp); }
+  lampOn = true; setLamp();
+  inv.clear(); uvOn = false;
+}
+function newGame() {
+  randomizePuzzles();
+  resetRoom();
+  state = 'play'; paused = false; playT = 0; hintsUsed = 0; hintKey = ''; hintIdx = 0;
+  if (reading) closeReader();
+  player.pos.set(0.7, 0, 0.5); player.vel.set(0, 0, 0);
+  player.yaw = 0.25; player.pitch = -0.05; rig.rotation.y = 0;
+  updateInv(); updateHud();
+  ['intro', 'win', 'pauseMenu'].forEach(id => $(id).hidden = true);
+  const vr = renderer.xr.isPresenting;
+  $('hud').hidden = vr; $('cross').hidden = vr; $('inv').hidden = vr; $('pauseBtn').hidden = vr;
+  renderer.domElement.classList.add('playing');
+  try { ac().resume(); } catch (e) {}
+  startAmbience();
+  document.activeElement?.blur();
+  toast('You wake up locked in an old study. Look around - things you can use glow when you point at them.', 6);
+  lockMouse();
+}
+function escaped() {
+  state = 'escaped'; doneT = 0;
+  let best = 0;
+  try { best = parseFloat(localStorage.getItem('escapeBest')) || 0; } catch (e) {}
+  const newBest = !best || playT < best;
+  if (newBest) try { localStorage.setItem('escapeBest', String(playT)); } catch (e) {}
+  const line = `Time ${fmt(playT)} · ${hintsUsed} hint${hintsUsed === 1 ? '' : 's'}${newBest ? ' · NEW BEST!' : ` · best ${fmt(best)}`}`;
+  sfx.win();
+  setPrompt('');
+  if (renderer.xr.isPresenting) toast(`YOU ESCAPED! ${line} · Pull the trigger to play again`, Infinity);
+  else {
+    $('winTime').textContent = line; $('win').hidden = false; $('toast').hidden = true;
+    $('hud').hidden = true; $('inv').hidden = true; $('cross').hidden = true; $('pauseBtn').hidden = true;
+    renderer.domElement.classList.remove('playing');
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+}
+function showBest() {
+  let best = 0;
+  try { best = parseFloat(localStorage.getItem('escapeBest')) || 0; } catch (e) {}
+  $('bestLine').textContent = best ? `YOUR BEST TIME: ${fmt(best)}` : '';
+}
+showBest();
+
+// ---------- Looking around with the mouse (same as the other games) ----------
+let locked = false, freeLook = false, mouseX = null;
+function lockMouse() {
+  if (renderer.xr.isPresenting) return;
+  const el = renderer.domElement;
+  const plainLock = () => { try { const p = el.requestPointerLock(); if (p && p.catch) p.catch(() => useFreeLook()); } catch (e) { useFreeLook(); } };
+  try {
+    const p = el.requestPointerLock({ unadjustedMovement: true });   // raw mouse input, like Minecraft
+    if (p && p.catch) p.catch(err => (err && err.name === 'NotSupportedError') ? plainLock() : useFreeLook());
+  } catch (e) { plainLock(); }
+}
+function useFreeLook() {
+  if (freeLook) return;
+  freeLook = true;
+  toast('MOVE THE MOUSE TO LOOK · PUSH IT TO THE SCREEN EDGE TO KEEP TURNING', 6);
+}
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === renderer.domElement;
+  if (!locked && !freeLook && state === 'play' && !paused && !renderer.xr.isPresenting) setPaused(true);
+});
+addEventListener('mousemove', e => {
+  mouseX = e.clientX;
+  if (!locked && !(freeLook && state === 'play' && !paused)) return;
+  const k = radiansPerPixel();
+  player.yaw -= e.movementX * k;
+  player.pitch = THREE.MathUtils.clamp(player.pitch - e.movementY * k, -Math.PI / 2, Math.PI / 2);
+});
+document.documentElement.addEventListener('mouseleave', e => {
+  const x = e.clientX ?? mouseX ?? innerWidth / 2;
+  mouseX = x <= innerWidth * 0.15 ? 0 : x >= innerWidth * 0.85 ? innerWidth : null;
+});
+let hot = null;   // the thing you're pointing at
+function useThing(h = hot) {
+  if (state !== 'play' || paused) return;
+  if (reading) { closeReader(); return; }
+  if (h) { h.act(); shadowFrames = 2; }
+}
+renderer.domElement.addEventListener('mousedown', e => {
+  if (e.button !== 0 || renderer.xr.isPresenting) return;
+  if (state !== 'play' || paused) return;
+  if (!locked && !freeLook) { lockMouse(); return; }
+  useThing();
+});
+$('reader').addEventListener('mousedown', () => { if (reading) closeReader(); });
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+  if (e.repeat || state === 'intro') return;
+  if (e.code === 'KeyP') { setPaused(!paused); if (!paused) lockMouse(); return; }
+  if (paused || state !== 'play') return;
+  if (e.code === 'KeyE') useThing();
+  else if (e.code === 'KeyF') toggleUV();
+  else if (e.code === 'KeyH') useHint();
+  else if (hot?.keypad) {
+    const digit = /^(Digit|Numpad)(\d)$/.exec(e.code);
+    if (digit) pressKey(hot.keypad, digit[2]);
+    else if (e.code === 'Enter' || e.code === 'NumpadEnter') pressKey(hot.keypad, 'OK');
+    else if (e.code === 'Backspace') pressKey(hot.keypad, 'C');
+  }
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+// ---------- Pause ----------
+const pauseSign = canvasPanel(0.9, 0.3, 768, 256, camera, V3(0, 0, -1.15), 1003);
+redrawTex(pauseSign.tex, (g, w, h) => {
+  g.fillStyle = 'rgba(16,12,9,0.94)'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#7a5a30'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#e0b45a'; g.font = 'bold 72px Georgia, serif'; g.fillText('PAUSED', w / 2, 95);
+  g.fillStyle = '#fff'; g.font = '30px Georgia, serif'; g.fillText('Y: resume    B: back to arcade', w / 2, 190);
+});
+function setPaused(p) {
+  if (state === 'intro') return;
+  if (state === 'escaped' && p) return;
+  paused = p;
+  $('pauseMenu').hidden = !p || renderer.xr.isPresenting;
+  pauseSign.mesh.visible = p && renderer.xr.isPresenting;
+  $('pauseBtn').hidden = p || renderer.xr.isPresenting || state !== 'play';
+  renderer.domElement.classList.toggle('playing', !p);
+  if (audio) p ? audio.suspend() : audio.resume();
+  if (p && document.pointerLockElement) document.exitPointerLock();
+}
+$('pauseBtn').addEventListener('click', () => setPaused(true));
+$('sens').value = Math.round(mcSensitivity * 200);
+$('sensVal').textContent = $('sens').value + '%';
+$('sens').addEventListener('input', () => {
+  mcSensitivity = $('sens').value / 200;
+  $('sensVal').textContent = $('sens').value + '%';
+  try { localStorage.setItem('mcSensitivity', String(mcSensitivity)); } catch (e) {}
+});
+$('resumeBtn').addEventListener('click', () => { setPaused(false); document.activeElement?.blur(); lockMouse(); });
+$('hintBtn').addEventListener('click', () => { setPaused(false); useHint(); document.activeElement?.blur(); lockMouse(); });
+$('restartBtn').addEventListener('click', () => { setPaused(false); newGame(); });
+$('againBtn').addEventListener('click', () => newGame());
+$('playBtn').addEventListener('click', () => newGame());
+function cantSwitchPagesNotice() {
+  if (location.protocol !== 'file:') return;
+  const n = document.createElement('div');
+  n.textContent = "This viewer can't switch pages. Play the arcade at http://localhost:8124 (or your GitHub link) and Back to Arcade will work.";
+  n.style.cssText = 'position:fixed;left:50%;top:60px;transform:translateX(-50%);max-width:90vw;background:rgba(0,0,0,.85);color:#fff;padding:12px 16px;font:13px system-ui,sans-serif;z-index:99;border:2px solid #e0b45a;border-radius:8px;text-align:center';
+  document.body.appendChild(n);
+  setTimeout(() => n.remove(), 7000);
+}
+function goToArcade() {
+  const go = () => { location.href = 'index.html'; setTimeout(cantSwitchPagesNotice, 700); };
+  if (renderer.xr.isPresenting && !inQuestApp) renderer.xr.getSession().end().finally(() => setTimeout(go, 300));
+  else go();
+}
+$('arcadeBtn').addEventListener('click', goToArcade);
+$('winArcadeBtn').addEventListener('click', goToArcade);
+document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPaused(true); });
+
+// ---------- VR controllers ----------
+const controllers = [];
+const vrTorch = makeTorch(); vrTorch.visible = false;
+let snapReady = true;
+for (let i = 0; i < 2; i++) {
+  const c = renderer.xr.getController(i);
+  c.addEventListener('connected', e => {
+    c.userData.input = e.data;
+    if (e.data.handedness === 'right') { c.add(vrTorch, uvLight, uvTarget); vrTorch.position.set(0, -0.01, 0.03); uvLight.position.set(0, 0, -0.07); uvTarget.position.set(0, 0, -5); }
+    if (e.data.handedness === 'left') { c.add(wrist.mesh); wrist.mesh.position.set(0, 0.05, 0.05); wrist.mesh.rotation.set(-1.0, 0, 0); wrist.mesh.visible = true; }
+  });
+  c.addEventListener('disconnected', () => { c.userData.input = null; });
+  c.addEventListener('selectstart', () => {
+    if (state === 'escaped' && doneT > 1.5) { newGame(); return; }
+    useThing(c.userData.hot);
+  });
+  // A simple controller body and a pointer laser
+  add(c, RB(0.035, 0.03, 0.1, 0.012), std({ color: 0x222226, roughness: 0.5 }), 0, -0.01, 0.04, { cast: false });
+  const laser = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V3(0, 0, 0), V3(0, 0, -1)]),
+    new THREE.LineBasicMaterial({ color: 0xe0b45a, transparent: true, opacity: 0.6 }));
+  c.add(laser);
+  c.userData.laser = laser;
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.006, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffe2a0 }));
+  dot.visible = false; scene.add(dot);
+  c.userData.dot = dot;
+  rig.add(c);
+  controllers.push(c);
+}
+renderer.xr.addEventListener('sessionstart', () => {
+  ['hud', 'cross', 'inv', 'pauseBtn', 'prompt', 'toast', 'reader', 'pauseMenu'].forEach(id => $(id).hidden = true);
+  pcTorch.visible = false;
+  if (state !== 'play') newGame();
+  const session = renderer.xr.getSession();
+  session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible') setPaused(true); });
+});
+renderer.xr.addEventListener('sessionend', () => {
+  holdUVOnCamera();
+  vrMsg.mesh.visible = vrPrompt.mesh.visible = pauseSign.mesh.visible = readerPlane.visible = false;
+  if (state === 'play') { $('hud').hidden = false; $('cross').hidden = false; $('inv').hidden = false; setPaused(true); }
+  updateInv();
+});
+function readVR() {
+  const out = { fx: 0, sx: 0 };
+  for (const c of controllers) {
+    const src = c.userData.input, pad = src?.gamepad;
+    if (!pad) continue;
+    const ax = stickDeadZone(pad.axes, src.handedness);
+    if (ax.length < 4) continue;
+    if (src.handedness === 'left') { out.sx = ax[2]; out.fx = -ax[3]; }
+    if (src.handedness === 'right') {
+      if (Math.abs(ax[2]) > 0.7 && snapReady) { rig.rotation.y -= Math.sign(ax[2]) * Math.PI / 6; snapReady = false; }
+      if (Math.abs(ax[2]) < 0.3) snapReady = true;
+    }
+  }
+  return out;
+}
+
+// ---------- Pointing at things ----------
+const raycaster = new THREE.Raycaster();
+function shown(o) { while (o) { if (!o.visible) return false; o = o.parent; } return true; }
+function pick(origin, dir, far) {
+  raycaster.set(origin, dir); raycaster.far = far;
+  for (const hit of raycaster.intersectObject(world, true)) {
+    const o = hit.object;
+    if (o.userData.noRay || !shown(o)) continue;
+    if (o.isLine || o.isPoints || o.isSprite) continue;
+    const h = o.userData.handler;
+    return { h: h && h.label() ? h : null, dist: hit.distance, point: hit.point };
+  }
+  return { h: null, dist: far, point: null };
+}
+let glowing = new Set();
+const tmpQ = new THREE.Quaternion();
+const center = new THREE.Vector2(0, 0);
+function updatePointing(inVR) {
+  const now = new Set();
+  let label = '';
+  if (state === 'play' && !paused && !reading) {
+    if (inVR) {
+      for (const c of controllers) {
+        if (!c.userData.input) { c.userData.hot = null; continue; }
+        c.getWorldPosition(tmpA);
+        tmpB.set(0, 0, -1).applyQuaternion(c.getWorldQuaternion(tmpQ));
+        const r = pick(tmpA, tmpB, VR_REACH);
+        c.userData.hot = r.h;
+        c.userData.laser.scale.z = r.dist;
+        c.userData.dot.visible = !!r.point; if (r.point) c.userData.dot.position.copy(r.point);
+        if (r.h) { now.add(r.h); if (!label || c.userData.input.handedness === 'right') label = r.h.label(); }
+      }
+      hot = null;
+    } else {
+      raycaster.setFromCamera(center, camera);
+      const r = pick(raycaster.ray.origin.clone(), raycaster.ray.direction.clone(), REACH);
+      hot = r.h;
+      if (hot) { now.add(hot); label = hot.label(); }
+    }
+  } else { hot = null; for (const c of controllers) { c.userData.hot = null; c.userData.dot.visible = false; } }
+  for (const h of glowing) if (!now.has(h)) glow(h, false);
+  for (const h of now) if (!glowing.has(h)) glow(h, true);
+  glowing = now;
+  setPrompt(label || '');
+}
+
+// ---------- Main loop ----------
+const clock = new THREE.Clock();
+const fwd = new THREE.Vector3(), right = new THREE.Vector3();
+let thunderT = 12 + rnd() * 20, flashT = -1, wristT = 0;
+randomizePuzzles(); resetRoom();
+player.pos.set(0.2, 0, 0.6);
+renderer.setAnimationLoop(frame);
+function frame() {
+  vrButtons();
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+  const inVR = renderer.xr.isPresenting;
+
+  if (toastT !== Infinity && toastT > 0) { toastT -= dt; if (toastT <= 0) { $('toast').hidden = true; vrMsg.mesh.visible = false; } }
+  for (const mv of movers) {
+    const target = mv.isOpen() ? 1 : 0;
+    if (Math.abs(target - mv.v) < 0.0005) continue;
+    mv.v += (target - mv.v) * Math.min(1, dt * mv.speed);
+    mv.apply(mv.v * mv.v * (3 - 2 * mv.v));
+    shadowFrames = 2;
+  }
+  // Shadows only get redrawn while something is moving (saves a lot of work on the Quest)
+  if (shadowFrames > 0) { renderer.shadowMap.needsUpdate = true; shadowFrames--; }
+  for (const kp of [safeKeypad, doorKeypad]) {
+    for (const b of kp.buttons) if (b.userData.pressT > 0 && (b.userData.pressT -= dt) <= 0) b.position.z = b.userData.baseZ;
+    if (kp.status === 'err' && (kp.statusT -= dt) <= 0) { kp.status = 'idle'; drawLCD(kp); }
+  }
+  world.userData.glass.material.map.offset.y = (t * 0.015) % 1;   // raindrops sliding down
+
+  // Lightning and thunder now and then
+  thunderT -= dt;
+  if (thunderT <= 0 && ambienceStarted) { thunderT = 25 + rnd() * 35; flashT = 0; setTimeout(thunder, 900 + rnd() * 1500); }
+  if (flashT >= 0) {
+    flashT += dt;
+    const on = (flashT < 0.08) || (flashT > 0.18 && flashT < 0.3);
+    moonLight.intensity = on ? 4 : 0.35;
+    world.userData.night.material.color.setScalar(on ? 3 : 1);
+    if (flashT > 0.35) flashT = -1;
+  }
+  if (lampOn) lampLight.intensity = 3.2 + Math.sin(t * 31) * 0.03;
+
+  const vr = inVR ? readVR() : null;
+  if (state === 'intro') {
+    player.yaw = 0.6 + Math.sin(t * 0.12) * 1.2; player.pitch = -0.08;
+  } else if (!paused) {
+    if (state === 'play') playT += dt;
+    if (state === 'escaped') doneT += dt;
+    let fx = 0, sx = 0;
+    if (inVR) ({ fx, sx } = vr);
+    else {
+      if (keys.KeyW) fx += 1; if (keys.KeyS) fx -= 1;
+      if (keys.KeyD) sx += 1; if (keys.KeyA) sx -= 1;
+      if (keys.ArrowLeft) player.yaw += 2.2 * dt;
+      if (keys.ArrowRight) player.yaw -= 2.2 * dt;
+      if (keys.ArrowUp) player.pitch = Math.min(1.55, player.pitch + 1.6 * dt);
+      if (keys.ArrowDown) player.pitch = Math.max(-1.55, player.pitch - 1.6 * dt);
+      if (freeLook && mouseX !== null) {
+        const edge = innerWidth * 0.08;
+        if (mouseX < edge) player.yaw += EDGE_TURN_SPEED * dt * (1 - mouseX / edge);
+        else if (mouseX > innerWidth - edge) player.yaw -= EDGE_TURN_SPEED * dt * (1 - (innerWidth - mouseX) / edge);
+      }
+    }
+    let yaw = player.yaw;
+    if (inVR) { camera.getWorldDirection(tmpA); yaw = Math.atan2(-tmpA.x, -tmpA.z); }
+    fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    const wish = new THREE.Vector3().addScaledVector(fwd, fx).addScaledVector(right, sx);
+    if (wish.lengthSq() > 1) wish.normalize();
+    const k = Math.min(1, 12 * dt);
+    player.vel.x += (wish.x * WALK_SPEED - player.vel.x) * k;
+    player.vel.z += (wish.z * WALK_SPEED - player.vel.z) * k;
+    player.pos.addScaledVector(player.vel, dt);
+    blockPlayer(player.pos);
+    const hs = Math.hypot(player.vel.x, player.vel.z);
+    if (hs > 0.4) {
+      const before = Math.sin(player.walkPhase);
+      player.walkPhase += dt * hs * 3.2;
+      if (before < 0 && Math.sin(player.walkPhase) >= 0) sfx.step();
+    }
+    if (state === 'play') {
+      if (player.pos.x > X1 + 0.6) escaped();
+      $('time').textContent = fmt(playT);
+      wristT -= dt; if (inVR && wristT <= 0) { wristT = 1; drawWrist(); }
+    }
+  }
+
+  rig.position.copy(player.pos);
+  if (!inVR) {
+    const bob = Math.sin(player.walkPhase * 2) * 0.02 * Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 2);
+    camera.position.set(0, EYE + bob, 0);
+    camera.rotation.set(player.pitch, player.yaw, 0);
+  }
+  for (const c of controllers) c.userData.laser.visible = inVR && state === 'play' && !paused;
+  updatePointing(inVR);
+  updateUV();
+  pauseSign.mesh.visible = paused && inVR;
+
+  renderer.render(scene, camera);
+}
+
+// Redraw the hand-written things once the fonts have loaded
+Promise.all([document.fonts.load('50px Caveat'), document.fonts.load('96px Cinzel')]).then(() => {
+  redrawTex(note1Tex, drawNote(NOTE1, '- Professor Ashford'));
+  redrawTex(note2Tex, drawNote(NOTE2, '- A.'));
+  specialBooks.forEach(drawSpecialSpine);
+  drawUVText();
+  redrawTex(uvArrow.tex, (g, w, h) => { uvInk(g, 'look closer →', w / 2, h / 2, 52); });
+}).catch(() => {});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
