@@ -932,7 +932,7 @@ function respawn(countFall) {
 // Starts (or restarts) the level that's loaded
 function startGame() {
   state = 'play'; paused = false; timerRunning = false; time = 0; falls = 0; cpIndex = 0;
-  flewThisRun = flying;   // still flying from the last course? (flying stays on once started)
+  flying = false; flewThisRun = false;
   resetCourseParts();
   beams.forEach(b => { b.material = beamMatOff; });
   respawn(false);
@@ -1053,7 +1053,7 @@ renderer.domElement.addEventListener('mousedown', e => {
 });
 
 // Secret codes: 7656 unlocks every level, 7655 turns flying on/off (then double-tap jump to fly)
-let flyAllowed = false, flying = false, flewThisRun = false, jumpWas = false, lastJumpTap = -9;
+let flyAllowed = false, flying = false, flewThisRun = false, jumpWas = false, lastJumpTap = -9, flyTipShown = false;
 try { localStorage.removeItem('parkourFly'); } catch (e) {}   // flying isn't remembered: type 7655 each visit
 const FLY_SPEED = 7;
 $('codeForm').addEventListener('submit', e => {
@@ -1062,8 +1062,8 @@ $('codeForm').addEventListener('submit', e => {
   let text = 'WRONG CODE.', ok = false;
   if (v === '7656') { progress.unlocked = LEVEL_COUNT; saveProgress(); renderLevelPicker(); text = 'CODE ACCEPTED! ALL LEVELS UNLOCKED.'; ok = true; }
   else if (v === '7655') {
-    flyAllowed = true; ok = true;   // typing it again doesn't turn flying off
-    text = 'FLYING ON! DOUBLE-TAP JUMP TO FLY.';
+    flyAllowed = !flyAllowed; if (!flyAllowed) flying = false; ok = true;
+    text = flyAllowed ? 'FLYING ON! DOUBLE-TAP JUMP TO FLY.' : 'FLYING OFF.';
   }
   $('codeMsg').textContent = text;
   $('codeMsg').className = ok ? 'ok' : 'bad';
@@ -1244,13 +1244,16 @@ function frame() {
     wish.set(0, 0, 0).addScaledVector(fwd, fx).addScaledVector(right, sx);
     if (wish.lengthSq() > 1) wish.normalize();
     if (wish.lengthSq() > 0.01 && state === 'play') timerRunning = true;   // clock starts when you first move
-    // Flying (secret code 7655): double-tap jump once to start flying. After that you keep flying
-    // (it never switches off, even on the next course) until you leave or reload the game.
-    if (jump && !jumpWas && flyAllowed && !flying && state === 'play') {
+    // Flying (secret code 7655): double-tap jump to start or stop flying.
+    // The "FLYING!" words only pop up the very first time (no words when you stop), so they don't get annoying.
+    if (jump && !jumpWas && flyAllowed && state === 'play') {
       if (t - lastJumpTap < 0.35) {
-        flying = true; flewThisRun = true; player.vel.y = 0; lastJumpTap = -9;
-        showMessage('FLYING!', inVR ? 'hold A to go up · pull the right stick back to go down' : 'hold SPACE to go up · SHIFT to go down', '#33f0ff', 2);
-        beep(880, 0.15, 'square', 0.08);
+        flying = !flying; lastJumpTap = -9;
+        if (flying) {
+          flewThisRun = true; player.vel.y = 0;
+          if (!flyTipShown) { flyTipShown = true; showMessage('FLYING!', inVR ? 'hold A to go up · pull the right stick back to go down' : 'hold SPACE to go up · SHIFT to go down', '#33f0ff', 2); }
+        }
+        beep(flying ? 880 : 440, 0.15, 'square', 0.08);
       } else lastJumpTap = t;
     }
     jumpWas = jump;
