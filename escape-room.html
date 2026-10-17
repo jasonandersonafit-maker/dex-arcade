@@ -1087,7 +1087,9 @@ function plaqueTex(lines, w = 512, h = 192) {
     g.textAlign = 'center'; g.textBaseline = 'middle';
     const lh = (h - 40) / lines.length;
     lines.forEach((l, i) => {
-      g.font = `bold ${Math.min(lh * 0.7, i === 0 && lines.length > 1 ? 40 : 56)}px Cinzel, Georgia, serif`;
+      // start big, then shrink until the words fit inside the border
+      let size = Math.min(lh * 0.7, i === 0 && lines.length > 1 ? h * 0.24 : h * 0.34);
+      do { g.font = `bold ${size}px Cinzel, Georgia, serif`; size -= 2; } while (g.measureText(l).width > w - 60 && size > 10);
       g.fillStyle = 'rgba(255,240,200,0.6)'; g.fillText(l, w / 2 + 1, 20 + lh * (i + 0.5) + 1);
       g.fillStyle = '#3a2408'; g.fillText(l, w / 2, 20 + lh * (i + 0.5));
     });
@@ -1112,7 +1114,7 @@ function noteUp(parent, x, y, z, tex, { w = 0.21, h = 0.28, flag, label = 'Read 
   return m;
 }
 function plaque(parent, x, y, z, lines, { w = 0.24, h = 0.09, label = 'Read the plaque', flag } = {}) {
-  const tex = plaqueTex(lines);
+  const tex = plaqueTex(lines, 768, Math.round(768 * h / w));   // canvas shaped like the plaque, so text isn't stretched
   const m = add(parent, B(w, h, 0.006), [M.brass, M.brass, M.brass, M.brass, std({ map: tex, metalness: 0.7, roughness: 0.35, envMapIntensity: 0.9 }), M.brass], x, y, z + 0.003);
   interact(m, () => label, () => { if (flag) flags[flag] = true; openReader(tex); });
   return m;
@@ -2393,7 +2395,7 @@ function lvlGallery() {
   solid(statue);
   inspect(statue, 'Look at the statue', 'A marble bust of the Professor. Of course.');
   const welcome = new THREE.Group(); onWall(welcome, 'E', 1.5, 1.45, 0);
-  plaque(welcome, 0, 0, 0, ['WELCOME TO THE GALLERY', 'The guide in the glass case knows the way out'], { w: 0.5, h: 0.16, flag: 'readWelcome' });
+  plaque(welcome, 0, 0, 0, ['WELCOME TO THE GALLERY', 'The guide in the glass case', 'knows the way out'], { w: 0.5, h: 0.22, flag: 'readWelcome' });
   makeExitDoor({ code: () => code });
   return {
     start: { x: 1.8, z: 1.6, yaw: 0.6 },
