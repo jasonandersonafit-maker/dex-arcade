@@ -1801,7 +1801,9 @@ function makePiano() {
   const NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], SEMI = [0, 2, 4, 5, 7, 9, 11];
   const n = 28, kw = (W - 0.16) / n, x0 = -(W - 0.16) / 2 + kw / 2;
   const ivory = std({ color: 0xf4efe2, roughness: 0.25, envMapIntensity: 0.6 }), ebony = std({ color: 0x0c0c0c, roughness: 0.3 });
-  const api = { onNote: null };
+  const api = { onNote: null, isDone: () => false };
+  // Where the camera zooms to: above the keys, looking down at them
+  api.anchor = new THREE.Object3D(); api.anchor.position.set(0, 0.72, 0.2); api.anchor.rotation.x = -1.1; g.add(api.anchor);
   for (let i = 0; i < n; i++) {
     const name = NAMES[i % 7], oct = Math.floor(i / 7), f = 130.81 * Math.pow(2, oct + SEMI[i % 7] / 12);
     const k = add(g, B(kw - 0.002, 0.022, 0.15), ivory, x0 + i * kw, 0.7, 0.21);
@@ -1813,7 +1815,7 @@ function makePiano() {
       k.position.y = 0.692; later(() => { k.position.y = 0.7; }, 160);
       sfx.piano(f);
       if (api.onNote) api.onNote(name);
-    });
+    }, { piano: api });
     if ([0, 1, 3, 4, 5].includes(i % 7) && i < n - 1) add(g, B(kw * 0.55, 0.03, 0.09), ebony, x0 + i * kw + kw / 2, 0.718, 0.18);
   }
   return { g, api };
@@ -2202,6 +2204,7 @@ function lvlMusic() {
   const benchIn = new THREE.Group(); benchIn.position.set(0, 0.461, 0); bench.add(benchIn);
   noteOn(benchIn, 0, 0.001, 0, 0.1, cardTex('DOOR CODE', code), { w: 0.16, h: 0.1, flag: 'readCard', label: 'Read the card' });
   let played = [];
+  piano.api.isDone = () => !!flags.benchOpen;
   piano.api.onNote = (n) => {
     if (flags.benchOpen) return;
     played.push(n); if (played.length > notes.length) played.shift();
@@ -2834,10 +2837,11 @@ function lockOf(h) {
   if (h.keypad) return { obj: h.keypad.group, dist: 0.3, isDone: () => h.keypad.done, kp: h.keypad };
   if (h.padlock) return { obj: h.padlock.group, dist: 0.22, isDone: () => h.padlock.done, pl: h.padlock };
   if (h.levers) return { obj: h.levers.group, dist: 0.75, isDone: () => h.levers.done };
+  if (h.piano) return { obj: h.piano.anchor, dist: Math.max(0.75, 1.0 / camera.aspect), isDone: h.piano.isDone, piano: true };   // farther on narrow screens so all the keys fit
   return null;
 }
 function enterZoom(lk) {
-  Object.assign(zoom, { active: true, obj: lk.obj, dist: lk.dist, isDone: lk.isDone, kp: lk.kp || null, pl: lk.pl || null, dial: 0, doneT: 0 });
+  Object.assign(zoom, { active: true, obj: lk.obj, dist: lk.dist, isDone: lk.isDone, kp: lk.kp || null, pl: lk.pl || null, piano: !!lk.piano, dial: 0, doneT: 0 });
   sfx.click();
   if (document.pointerLockElement) document.exitPointerLock();   // free the mouse so you can click buttons
   renderer.domElement.classList.remove('playing');
@@ -2845,6 +2849,7 @@ function enterZoom(lk) {
   $('cross').hidden = true; $('prompt').hidden = true;
   $('zoomHint').textContent = zoom.pl ? 'CLICK A DIAL TO TURN IT · OR TYPE THE NUMBERS · E OR ESC TO STEP BACK'
     : zoom.kp ? 'CLICK THE BUTTONS · OR TYPE NUMBERS ON YOUR KEYBOARD · E OR ESC TO STEP BACK'
+    : zoom.piano ? 'CLICK THE PIANO KEYS TO PLAY THEM · E OR ESC TO STEP BACK'
     : 'CLICK A LEVER TO PULL IT · E OR ESC TO STEP BACK';
   $('zoomHint').hidden = false;
 }
