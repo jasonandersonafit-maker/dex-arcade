@@ -24,7 +24,8 @@
   #tip { position:fixed; left:0; right:0; bottom:80px; text-align:center; font-size:9px; color:var(--muted); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
   .overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(0,0,0,.6); padding:16px; }
   .card { background:var(--panel); border:3px solid #000; outline:3px solid #3a2a4a; padding:24px; max-width:540px;
-          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7; }
+          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7;
+          max-height:calc(100vh - 32px); overflow-y:auto; box-sizing:border-box; }
   .card h1 { margin:0; font-family:'Creepster', 'Press Start 2P', cursive; font-weight:400; font-size:clamp(36px, 8vw, 56px);
              letter-spacing:.06em; color:var(--ghost); text-shadow:0 0 18px rgba(160,220,255,.6); }
   .card h2 { margin:0; font-size:22px; color:var(--ghost); }
@@ -41,12 +42,18 @@
   .sens { display:flex; flex-direction:column; gap:8px; font-size:9px; color:var(--muted); }
   .sens input { width:100%; accent-color:#7a6aa0; }
   a.back { font-size:9px; color:var(--muted); }
+  /* Level picker on the start screen */
+  .levels { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  .levels button.mc { padding:8px 4px; font-size:14px; line-height:1.6; }
+  .levels button.mc:disabled { opacity:.45; cursor:not-allowed; background:#2a2630; }
+  #levelName { color:var(--ghost); font-size:9px; }
   #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
   @media (prefers-reduced-motion: reduce) { #flash { transition:none; } }
 </style>
 </head>
 <body>
 <div id="hud" hidden>
+  <div>LEVEL <b id="lvl">1</b>/4</div>
   <div>KEYS <b id="keys">0/3</b></div>
   <div id="goal">FIND THE 3 KEYS</div>
 </div>
@@ -58,7 +65,10 @@
 <div id="intro" class="overlay">
   <div class="card">
     <h1>Haunted Maze</h1>
-    <p>You're lost in a haunted maze with only a flashlight. Find the 3 glowing keys to unlock the gate, then escape. Listen for the keys' chime: it gets louder as you get closer.</p>
+    <p>You're lost in a haunted maze with only a flashlight. Find the glowing keys to unlock the gate, then escape. Listen for the keys' chime: it gets louder as you get closer. 4 mazes, each one bigger and scarier.</p>
+    <p>PICK A LEVEL:</p>
+    <div class="levels" id="levels"></div>
+    <p id="levelName"></p>
     <p class="warn">You can't die... it just wants to scare you. Pick how scary you want it:</p>
     <div class="controls">
       <div><b>PC</b>Mouse: look around<br>W A S D: move<br>Space: jump<br>P: pause</div>
@@ -77,7 +87,7 @@
     <label class="sens" for="sens">MOUSE SENSITIVITY: <span id="sensVal">100%</span>
       <input id="sens" type="range" min="0" max="200" step="1" value="100">
     </label>
-    <button id="restartBtn" class="mc" type="button">New Maze</button>
+    <button id="restartBtn" class="mc" type="button">New Maze<br><small>RESTART THIS LEVEL</small></button>
     <button id="arcadeBtn" class="mc" type="button">Back to Arcade</button>
   </div>
 </div>
@@ -96,9 +106,38 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 const WALK_SPEED = 4.3;          // same as the other block games (no sprint)
 const JUMP_SPEED = 8.4;
 const GRAVITY = 28;
-const MAZE_SIZE = 10;            // rooms per side (bigger = longer maze)
-const KEYS_NEEDED = 3;
 const FIRST_SCARE_AFTER = 12;    // seconds of calm before things start happening
+// The 4 levels. Each one is bigger and scarier than the last.
+//   size: rooms per side (bigger = longer maze)   keys: keys you need to open the gate
+//   fog: how far you can see                      light: flashlight brightness (60 = full)
+//   scare: how long between scares (smaller = more often)
+//   battery: the flashlight keeps sputtering      wanderer: a ghost roams the maze (its speed) and steals keys
+//   creepingDark: the dark slowly closes in, every key you find pushes it back
+const LEVELS = [
+  { name: 'THE CELLAR',           size: 10, keys: 3, fog: 17, light: 60, scare: 1,    color: '#c8f0ff',
+    intro: 'find the 3 keys · listen for their chime...' },
+  { name: 'THE FLICKERING HALLS', size: 12, keys: 4, fog: 15, light: 48, scare: 0.8,  color: '#ffd23d', battery: true,
+    intro: 'find 4 keys · your flashlight battery is dying...' },
+  { name: 'THE WANDERER',         size: 14, keys: 5, fog: 14, light: 54, scare: 0.7,  color: '#a8ffd0', wanderer: 1.4,
+    intro: 'find 5 keys · something roams here. if it touches you, it steals a key' },
+  { name: 'THE ENDLESS DARK',     size: 16, keys: 6, fog: 14, light: 48, scare: 0.55, color: '#ff8a8a', wanderer: 1.9, battery: true, creepingDark: true,
+    intro: 'find 6 keys · the dark is closing in. every key pushes it back' },
+];
+let level = 1, L = LEVELS[0];
+let MAZE_SIZE = L.size, KEYS_NEEDED = L.keys, flashPower = L.light;
+function setLevel(n) {
+  level = n; L = LEVELS[n - 1];
+  MAZE_SIZE = L.size; KEYS_NEEDED = L.keys; flashPower = L.light;
+  G = MAZE_SIZE * 2 + 1;
+}
+// Saved progress: which levels are unlocked and your best time on each
+let progress = { unlocked: 1, best: {} };
+try {
+  const p = JSON.parse(localStorage.getItem('mazeProgress') || 'null');
+  if (p && p.unlocked >= 1) progress = { unlocked: Math.min(4, p.unlocked | 0), best: p.best || {} };
+} catch (e) {}
+function saveProgress() { try { localStorage.setItem('mazeProgress', JSON.stringify(progress)); } catch (e) {} }
+let pickedLevel = progress.unlocked;   // the start screen starts the highest level you've unlocked
 // Jump scares on or off (picked on the start screen, remembered for next time)
 let jumpScares = true;
 try { if (localStorage.getItem('mazeJumpScares') === 'off') jumpScares = false; } catch (e) {}
@@ -227,7 +266,7 @@ const ceilTex = canvasTex(16, 16, (g) => {
 ceilTex.wrapS = ceilTex.wrapT = THREE.RepeatWrapping;
 
 // ---------- The maze (a new one every game) ----------
-const G = MAZE_SIZE * 2 + 1;   // grid size: walls and paths
+let G = MAZE_SIZE * 2 + 1;     // grid size: walls and paths (changes with the level)
 const CELL = 2;                // each grid square is 2 blocks wide
 const WALL_H = 3;
 let grid, gateCell, exitX, keySpots, gateOpen;
@@ -301,8 +340,19 @@ let mazeGroup = null;
 const keys3d = [], candleLights = [];
 let gateMesh, exitLight;
 const writings = ['TURN BACK', 'IT SEES YOU', "DON'T LOOK BEHIND YOU", 'GET OUT', 'HE IS CLOSE', 'NO ESCAPE', 'WHO TURNED OFF THE LIGHTS?'];
+const sharedTex = [brickTex, floorTex, ceilTex];
 function buildMaze() {
-  if (mazeGroup) scene.remove(mazeGroup);
+  if (mazeGroup) {
+    scene.remove(mazeGroup);
+    // Free the old maze's memory on the graphics card (matters on Quest when levels get bigger)
+    mazeGroup.traverse(o => {
+      if (o.isMesh) {
+        o.geometry.dispose();
+        if (o.material.map && !sharedTex.includes(o.material.map)) o.material.map.dispose();
+        o.material.dispose();
+      } else if (o.isSprite) o.material.dispose();
+    });
+  }
   mazeGroup = new THREE.Group();
   scene.add(mazeGroup);
   keys3d.length = 0; candleLights.length = 0;
@@ -456,6 +506,82 @@ const ghost = makeGhost();
 scene.add(ghost);
 const ghostState = { mode: 'hidden', t: 0 };
 
+// The Wanderer (levels 3 and 4): a pale green ghost that drifts along the hallways.
+// It can't hurt you, but if it touches you it steals your newest key and hides it somewhere else.
+const wanderer = makeGhost();
+wanderer.children[0].material.color.set(0xc8ffe0);
+wanderer.children[0].material.emissive.set(0x1a4a30);
+wanderer.children[0].material.opacity = 0.7;
+wanderer.children[5].material.color.set(0x9affc8);
+scene.add(wanderer);
+const wand = { gx: 0, gz: 0, tx: 0, tz: 0, px: 0, pz: 0, cool: 0, moan: 0 };
+const takenOrder = [];   // keys in the order you picked them up (the ghost steals the newest)
+// A random room far away from you (in grid squares)
+function farRoom(minDist) {
+  const pgx = Math.floor(player.pos.x / CELL), pgz = Math.floor(player.pos.z / CELL);
+  let best = { x: G - 2, z: 1 }, bestD = -1;
+  for (let i = 0; i < 60; i++) {
+    const x = 1 + 2 * Math.floor(rnd() * MAZE_SIZE), z = 1 + 2 * Math.floor(rnd() * MAZE_SIZE);
+    const d = Math.abs(x - pgx) + Math.abs(z - pgz);
+    if (keys3d.some(k => !k.userData.taken && Math.floor(k.position.x / CELL) === x && Math.floor(k.position.z / CELL) === z)) continue;
+    if (d >= minDist) return { x, z };
+    if (d > bestD) { bestD = d; best = { x, z }; }
+  }
+  return best;
+}
+function placeWanderer(cell) {
+  wand.gx = wand.tx = cell.x; wand.gz = wand.tz = cell.z;
+  wand.px = wand.gx; wand.pz = wand.gz;
+  wanderer.position.set(cell.x * CELL + 1, 0, cell.z * CELL + 1);
+}
+const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+function updateWanderer(dt) {
+  wand.cool -= dt;
+  const tx = wand.tx * CELL + 1, tz = wand.tz * CELL + 1;
+  const dx = tx - wanderer.position.x, dz = tz - wanderer.position.z, d = Math.hypot(dx, dz);
+  const step = L.wanderer * dt;
+  if (d > step) { wanderer.position.x += dx / d * step; wanderer.position.z += dz / d * step; }
+  else {
+    // Reached the next square: pick another hallway (never straight back unless it's a dead end)
+    wanderer.position.x = tx; wanderer.position.z = tz;
+    wand.px = wand.gx; wand.pz = wand.gz; wand.gx = wand.tx; wand.gz = wand.tz;
+    let bestX = wand.px, bestZ = wand.pz, bestScore = Infinity, choices = 0;
+    const chase = Math.hypot(player.pos.x - tx, player.pos.z - tz) < 12 && rnd() < 0.6;   // drifts toward you when you're near
+    for (const [ox, oz] of DIRS4) {
+      const nx = wand.gx + ox, nz = wand.gz + oz;
+      if (nx < 1 || nz < 1 || nx > G - 2 || nz > G - 2 || grid[nx + nz * G] === 1) continue;
+      if (nx === wand.px && nz === wand.pz) continue;
+      choices++;
+      const score = chase ? Math.hypot(player.pos.x - (nx * CELL + 1), player.pos.z - (nz * CELL + 1)) : rnd();
+      if (score < bestScore) { bestScore = score; bestX = nx; bestZ = nz; }
+    }
+    wand.tx = bestX; wand.tz = bestZ;
+  }
+  wanderer.position.y = 0.15 + Math.sin(playT * 1.7) * 0.1;
+  wanderer.lookAt(player.pos.x, wanderer.position.y, player.pos.z);
+  const pd = Math.hypot(wanderer.position.x - player.pos.x, wanderer.position.z - player.pos.z);
+  // A low moan when it's close, so you know it's around
+  wand.moan -= dt;
+  if (pd < 8 && wand.moan <= 0) { tone(110 + rnd() * 30, 1.6, 'triangle', 0.05 * (1 - pd / 8) + 0.01, 80, 0); wand.moan = 3 + rnd() * 2; }
+  if (pd < 0.85 && wand.cool <= 0) wandererTouch();
+}
+function wandererTouch() {
+  wand.cool = 6;
+  if (jumpScares) { stinger(); screech(); redFlash(); } else whisper();
+  scared(jumpScares);
+  if (keysFound > 0 && !gateOpen) {
+    // It steals your newest key and hides it far away
+    const key = takenOrder.pop();
+    const room = farRoom(10);
+    key.position.set(room.x * CELL + 1, 1.2, room.z * CELL + 1);
+    key.userData.taken = false; key.visible = true;
+    keysFound--;
+    updateHud();
+    showMessage('IT STOLE A KEY!', 'it hid it somewhere in the maze... listen for the chime', '#a8ffd0', 3.5);
+  } else showMessage('IT TOUCHED YOU...', keysFound ? 'too late, the gate is already open' : 'nothing to steal... yet', '#a8ffd0', 2.5);
+  placeWanderer(farRoom(14));   // then it vanishes and drifts somewhere else
+}
+
 // Jump-scare face that rushes at your eyes
 const scareFace = (() => {
   const tex = canvasTex(512, 512, (g) => {
@@ -598,11 +724,13 @@ camera.add(pauseSign);
 // ---------- Game state ----------
 let state = 'intro';     // intro → play → escaped
 let paused = false, keysFound = 0, scares = 0, playT = 0, doneT = 0;
-const timers = { ghost: 0, jump: 0, flicker: 0, sound: 0, chime: 0, steps: 0 };
+const timers = { ghost: 0, jump: 0, flicker: 0, sound: 0, chime: 0, steps: 0, stutter: 0 };
+let stutterT = 0, fogFar = 17;
 let flicker = { t: -1 }, follow = { t: -1, lastStep: 0 };
 let heartbeatUntil = 0, heartT = 0;
 const $ = id => document.getElementById(id);
 const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const moreWords = ['no', 'one', 'two', 'three', 'four', 'five'];
 
 function scared(big = false) {
   scares++;
@@ -615,10 +743,17 @@ function redFlash() {
   requestAnimationFrame(() => { f.style.transition = 'opacity 1.2s'; f.style.opacity = '0'; });
 }
 
-function newGame() {
+function newGame(n = level) {
+  setLevel(n);
   generateMaze();
   buildMaze();
   state = 'play'; paused = false; keysFound = 0; scares = 0; playT = 0;
+  takenOrder.length = 0;
+  fogFar = L.fog; scene.fog.far = fogFar;
+  flashlight.intensity = flashPower;
+  stutterT = 0; timers.stutter = 8 + rnd() * 6;
+  wanderer.visible = !!L.wanderer;
+  if (L.wanderer) { wand.cool = 0; wand.moan = 0; placeWanderer(farRoom(Math.floor(MAZE_SIZE * 1.2))); }
   player.pos.set(1 * CELL + 1, 0, 1 * CELL + 1);
   player.vel.set(0, 0, 0);
   // Face down the open corridor
@@ -643,19 +778,39 @@ function newGame() {
   try { ac().resume(); } catch (e) {}
   startDrone();
   document.activeElement?.blur();
-  showMessage('FIND THE 3 KEYS', 'listen for their chime...', '#c8f0ff', 3);
+  showMessage(`LEVEL ${level}: ${L.name}`, L.intro, L.color, 4.5);
   lockMouse();
 }
 function updateHud() {
+  $('lvl').textContent = level;
   $('keys').textContent = `${keysFound}/${KEYS_NEEDED}`;
-  $('goal').textContent = keysFound < KEYS_NEEDED ? `FIND THE ${KEYS_NEEDED} KEYS` : 'THE GATE IS OPEN... FIND THE EXIT';
+  $('goal').textContent = state === 'escaped' ? (level < 4 ? `CLICK FOR LEVEL ${level + 1}` : 'CLICK TO PLAY AGAIN')
+    : keysFound < KEYS_NEEDED ? `FIND THE ${KEYS_NEEDED} KEYS` : 'THE GATE IS OPEN... FIND THE EXIT';
 }
 function escaped() {
   state = 'escaped'; doneT = 0;
-  showMessage('YOU ESCAPED!', `${fmt(playT)} · scared ${scares} time${scares === 1 ? '' : 's'} · ${renderer.xr.isPresenting ? 'trigger' : 'click'} for a new maze`, '#b8ffb8', Infinity);
+  // Save: best time for this level, and unlock the next one
+  const prev = progress.best[level];
+  const newBest = !(prev > 0) || playT < prev;
+  if (newBest) progress.best[level] = Math.round(playT * 10) / 10;
+  if (level < 4) progress.unlocked = Math.max(progress.unlocked, level + 1);
+  saveProgress();
+  pickedLevel = level < 4 ? level + 1 : 1;
+  renderLevelPicker();
+  const how = renderer.xr.isPresenting ? 'trigger' : 'click';
+  const stats = `${fmt(playT)}${newBest ? ' (best!)' : ''} · scared ${scares} time${scares === 1 ? '' : 's'}`;
+  if (level < 4) showMessage(`LEVEL ${level} ESCAPED!`, `${stats} · ${how} for level ${level + 1}`, '#b8ffb8', Infinity);
+  else showMessage('YOU ESCAPED ALL 4 MAZES!', `${stats} · ${how} to start again at level 1`, '#b8ffb8', Infinity);
   [392, 523, 659, 784].forEach((f, i) => tone(f, 0.4, 'triangle', 0.12, f, 0, i * 0.15));
+  if (level === 4) [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.6, 'triangle', 0.1, f, 0, 0.7 + i * 0.15));
   ghost.visible = false; ghostState.mode = 'hidden';
+  wanderer.visible = false;
+  scene.fog.far = L.fog;
+  flicker.t = -1; stutterT = 0; if (faceT < 0) flashlight.intensity = flashPower;
+  updateHud();
 }
+// After escaping: on to the next level (after level 4, back to level 1)
+function nextLevel() { newGame(level < 4 ? level + 1 : 1); }
 
 // ---------- Scares ----------
 const fwd = new THREE.Vector3(), right = new THREE.Vector3(), tmpV = new THREE.Vector3();
@@ -704,24 +859,33 @@ function updateScares(dt) {
   timers.ghost -= dt;
   if (timers.ghost <= 0 && ghostState.mode === 'hidden' && faceT < 0) {
     const spot = spotAhead(6);
-    if (spot) { showGhost(spot, 'watch'); whisper(); if (jumpScares) stinger(); scared(); timers.ghost = 22 + rnd() * 18; }
+    if (spot) { showGhost(spot, 'watch'); whisper(); if (jumpScares) stinger(); scared(); timers.ghost = (22 + rnd() * 18) * L.scare; }
     else timers.ghost = 2;   // try again soon
   }
   // Flashlight dies (and maybe something is there when it comes back)
   timers.flicker -= dt;
-  if (timers.flicker <= 0 && flicker.t < 0 && faceT < 0 && ghostState.mode === 'hidden') { flicker.t = 0; breath(0.6); timers.flicker = 28 + rnd() * 20; }
+  if (timers.flicker <= 0 && flicker.t < 0 && faceT < 0 && ghostState.mode === 'hidden') { flicker.t = 0; stutterT = 0; breath(0.6); timers.flicker = (28 + rnd() * 20) * L.scare; }
   // Big jump scare
   timers.jump -= dt;
-  if (jumpScares && timers.jump <= 0 && faceT < 0 && flicker.t < 0) { jumpScare(); timers.jump = 55 + rnd() * 35; }
+  if (jumpScares && timers.jump <= 0 && faceT < 0 && flicker.t < 0) { jumpScare(); timers.jump = (55 + rnd() * 35) * L.scare; }
   // Footsteps following you
   timers.steps -= dt;
-  if (timers.steps <= 0 && follow.t < 0) { follow.t = 0; timers.steps = 40 + rnd() * 25; }
+  if (timers.steps <= 0 && follow.t < 0) { follow.t = 0; timers.steps = (40 + rnd() * 25) * L.scare; }
+  // Dying battery (levels 2 and 4): the flashlight sputters for a moment every few seconds
+  if (L.battery && flicker.t < 0 && faceT < 0) {
+    timers.stutter -= dt;
+    if (timers.stutter <= 0) { stutterT = 0.3 + rnd() * 0.6; timers.stutter = 6 + rnd() * 8; if (rnd() < 0.3) noise(0.1, 'highpass', 4000, 0.05); }
+    if (stutterT > 0) {
+      stutterT -= dt;
+      flashlight.intensity = stutterT > 0 ? (rnd() < 0.5 ? flashPower * 0.1 : flashPower * rnd()) : flashPower;
+    }
+  }
   // Random creepy sounds
   timers.sound -= dt;
   if (timers.sound <= 0) {
     const r = rnd();
     if (r < 0.35) whisper(); else if (r < 0.6) knock(); else if (r < 0.85) creak(); else distantScream();
-    timers.sound = 7 + rnd() * 8;
+    timers.sound = (7 + rnd() * 8) * L.scare;
   }
 
   // --- Ghost behaviour ---
@@ -746,10 +910,10 @@ function updateScares(dt) {
   if (flicker.t >= 0) {
     flicker.t += dt;
     const ft = flicker.t;
-    if (ft < 1.2) flashlight.intensity = Math.random() < 0.5 ? 0 : 60 * Math.random();   // sputtering
-    else if (ft < 3.4) flashlight.intensity = 0;                                         // dark...
+    if (ft < 1.2) flashlight.intensity = Math.random() < 0.5 ? 0 : flashPower * Math.random();   // sputtering
+    else if (ft < 3.4) flashlight.intensity = 0;                                                 // dark...
     else {
-      flashlight.intensity = 60;
+      flashlight.intensity = flashPower;
       flicker.t = -1;
       if (jumpScares && rnd() < 0.45) {                                                   // ...something is RIGHT THERE
         const spot = spotAhead(2.2);
@@ -780,7 +944,7 @@ function updateScares(dt) {
     scareFace.position.x = (Math.random() - 0.5) * 0.04;
     scareFace.position.y = (Math.random() - 0.5) * 0.04;
     scareFace.material.opacity = faceT < 0.7 ? 1 : Math.max(0, 1 - (faceT - 0.7) / 0.4);
-    if (faceT > 1.1) { faceT = -1; scareFace.visible = false; flashlight.intensity = 60; }
+    if (faceT > 1.1) { faceT = -1; scareFace.visible = false; flashlight.intensity = flashPower; }
   }
 
   // --- Racing heartbeat after a scare ---
@@ -823,7 +987,7 @@ document.documentElement.addEventListener('mouseleave', e => {
 });
 renderer.domElement.addEventListener('mousedown', e => {
   if (e.button !== 0 || renderer.xr.isPresenting) return;
-  if (state === 'escaped' && doneT > 1.2) { newGame(); return; }
+  if (state === 'escaped' && doneT > 1.2) { nextLevel(); return; }
   if (!locked && !freeLook && state === 'play' && !paused) lockMouse();
 });
 const keys = {};
@@ -831,6 +995,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   if (e.code === 'KeyP' && !e.repeat && state !== 'intro') { setPaused(!paused); if (!paused) lockMouse(); }
+  if (e.code === 'Enter' && !e.repeat && state === 'escaped' && doneT > 1.2 && !paused) nextLevel();   // Enter works too
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -855,7 +1020,7 @@ $('sens').addEventListener('input', () => {
   try { localStorage.setItem('mcSensitivity', String(mcSensitivity)); } catch (e) {}
 });
 $('resumeBtn').addEventListener('click', () => { setPaused(false); document.activeElement?.blur(); lockMouse(); });
-$('restartBtn').addEventListener('click', () => { setPaused(false); newGame(); });
+$('restartBtn').addEventListener('click', () => { setPaused(false); newGame(level); });   // a fresh maze, same level
 function cantSwitchPagesNotice() {
   if (location.protocol !== 'file:') return;
   const n = document.createElement('div');
@@ -873,12 +1038,31 @@ $('arcadeBtn').addEventListener('click', goToArcade);
 function chooseScares(on) {
   jumpScares = on;
   try { localStorage.setItem('mazeJumpScares', on ? 'on' : 'off'); } catch (e) {}
-  newGame();
+  newGame(pickedLevel);
 }
 $('playScary').addEventListener('click', () => chooseScares(true));
 $('playCalm').addEventListener('click', () => chooseScares(false));
 // Show which one you picked last time
 $(jumpScares ? 'playScary' : 'playCalm').classList.add('chosen');
+// Level picker: buttons 1-4 (locked ones show a lock), with your best time under each
+function renderLevelPicker() {
+  const box = $('levels');
+  box.textContent = '';
+  for (let i = 1; i <= 4; i++) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'mc';
+    const locked = i > progress.unlocked, best = progress.best[i];
+    b.disabled = locked;
+    b.innerHTML = `${locked ? '🔒' : i}<br><small>${locked ? 'LOCKED' : best ? fmt(best) : '--:--'}</small>`;
+    b.setAttribute('aria-label', `Level ${i}${locked ? ', locked' : best ? ', best time ' + fmt(best) : ''}`);
+    if (i === pickedLevel) b.classList.add('chosen');
+    b.addEventListener('click', () => { pickedLevel = i; renderLevelPicker(); });
+    box.appendChild(b);
+  }
+  const P = LEVELS[pickedLevel - 1];
+  $('levelName').textContent = `LEVEL ${pickedLevel}: ${P.name} · ${P.keys} KEYS`;
+}
+renderLevelPicker();
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPaused(true); });
 
 // ---------- VR controllers ----------
@@ -891,7 +1075,7 @@ for (let i = 0; i < 2; i++) {
     if (e.data.handedness === 'right') { c.add(flashlight, flashTarget); flashlight.position.set(0, 0, 0); flashTarget.position.set(0, 0, -5); }   // flashlight in your hand
   });
   c.addEventListener('disconnected', () => { c.userData.input = null; });
-  c.addEventListener('selectstart', () => { if (state === 'escaped' && doneT > 1.2) newGame(); });
+  c.addEventListener('selectstart', () => { if (state === 'escaped' && doneT > 1.2 && !paused) nextLevel(); });
   // A little flashlight model
   const torch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.025, 0.16, 10), new THREE.MeshStandardMaterial({ color: 0x2a2a2a }));
   torch.rotation.x = Math.PI / 2;
@@ -901,7 +1085,7 @@ for (let i = 0; i < 2; i++) {
 }
 renderer.xr.addEventListener('sessionstart', () => {
   $('hud').hidden = true; $('cross').hidden = true;
-  if (state === 'intro') newGame();
+  if (state === 'intro') newGame(pickedLevel);
   const session = renderer.xr.getSession();
   session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible') setPaused(true); });
 });
@@ -934,7 +1118,7 @@ let gateLift = 0;
 generateMaze(); buildMaze();   // a maze to look at behind the start menu
 player.pos.set(CELL + 1, 0, CELL + 1);
 
-renderer.setAnimationLoop(() => {
+function frame() {
   vrPauseButtons();
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
@@ -1000,15 +1184,17 @@ renderer.setAnimationLoop(() => {
         if (key.userData.taken) continue;
         if (Math.hypot(key.position.x - player.pos.x, key.position.z - player.pos.z) < 0.9) {
           key.userData.taken = true; key.visible = false;
+          takenOrder.push(key);
           keysFound++;
           updateHud();
+          if (L.creepingDark) fogFar = L.fog;   // the key's glow pushes the dark back
           [1047, 1319, 1568].forEach((f, i) => tone(f, 0.5, 'triangle', 0.1, f, 0, i * 0.1));
           if (keysFound === 2 && jumpScares) setTimeout(() => { if (state === 'play' && !paused) jumpScare(); }, 900);   // of course...
           if (keysFound === KEYS_NEEDED) {
             showMessage('THE GATE IS OPEN', 'find the way out...', '#b8ffb8', 3);
             gateOpen = true;
             creak(); setTimeout(creak, 400); knock();
-          } else showMessage(`KEY ${keysFound} OF ${KEYS_NEEDED}`, keysFound === 1 ? 'two more...' : 'one more...', '#ffd23d', 2);
+          } else showMessage(`KEY ${keysFound} OF ${KEYS_NEEDED}`, `${moreWords[KEYS_NEEDED - keysFound]} more...`, '#ffd23d', 2);
         }
       }
       // Keys softly chime: louder when you're close
@@ -1031,9 +1217,13 @@ renderer.setAnimationLoop(() => {
           tone(2637, 0.6, 'sine', vol * 0.5, 2637, THREE.MathUtils.clamp(pan, -1, 1), 0.08);
         }
       }
+      // The Wanderer drifts around (levels 3 and 4)
+      if (L.wanderer) updateWanderer(dt);
+      // The creeping dark (level 4): you can see a little less every second, down to a few squares
+      if (L.creepingDark) { fogFar = Math.max(7, fogFar - dt * 0.05); scene.fog.far = fogFar; }
       // Made it out?
       if (gateOpen && player.pos.x > exitX) escaped();
-      if (playT > FIRST_SCARE_AFTER || keysFound > 0) updateScares(dt);
+      if (state === 'play' && (playT > FIRST_SCARE_AFTER || keysFound > 0)) updateScares(dt);
     }
   }
   // Gate slides up into the ceiling once all keys are found
@@ -1051,7 +1241,20 @@ renderer.setAnimationLoop(() => {
   pauseSign.visible = paused && inVR;
 
   renderer.render(scene, camera);
-});
+}
+renderer.setAnimationLoop(frame);
+
+// Testing helper: only exists when the page address has ?debug in it
+if (location.search.includes('debug')) window.__dbg = {
+  get info() { return { state, level, G, keysNeeded: KEYS_NEEDED, keysFound, keys3d: keys3d.length, gateOpen, fog: scene.fog.far,
+    flash: flashlight.intensity, wanderer: wanderer.visible, playT, progress, pickedLevel, walls: mazeGroup.children[2].count }; },
+  run(n, dt = 1 / 60) { const g = clock.getDelta; clock.getDelta = () => dt; try { for (let i = 0; i < n; i++) frame(); } finally { clock.getDelta = g; } },
+  grabKeys(n = KEYS_NEEDED) { for (const k of keys3d) { if (n <= 0) break; if (k.userData.taken) continue; player.pos.set(k.position.x, 0, k.position.z); this.run(2); n--; } },
+  toExit() { player.pos.set(G * CELL - 0.6, 0, gateCell.z * CELL + 1); player.vel.set(0, 0, 0); this.run(30); },
+  touchWanderer() { wanderer.position.set(player.pos.x, 0, player.pos.z); wand.tx = Math.floor(player.pos.x / CELL); wand.tz = Math.floor(player.pos.z / CELL); wand.cool = 0; this.run(1); },
+  look(yaw, pitch = 0) { player.yaw = yaw; player.pitch = pitch; this.run(1); },
+  newGame, nextLevel, player, wanderer, wallAt, keys3d,
+};
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
