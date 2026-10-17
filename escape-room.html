@@ -1928,36 +1928,45 @@ function makePhone() {
 }
 
 // ---------- Invisible ink (UV light) and glow paint (shows in the dark) ----------
-function inkMark(list, side, a, y, w, h, pw, ph, draw, o = 0.004) {
-  const tex = canvasTex(pw, ph, () => {});
-  const m = add(world, P(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), 0, 0, 0, { cast: false, receive: false });
-  m.position.copy(SIDES[side].at(a, y, o)); m.rotation.y = SIDES[side].rot; m.userData.noRay = true;
-  const mark = { mesh: m, tex, wp: m.position.clone(), v: 0 };
-  const redraw = () => redrawTex(tex, draw);
+// Ink is drawn at 2-4x the size it's laid out at, so it stays sharp up close.
+// UV ink is drawn normally (with a dark edge) so it still shows on white walls; glow paint adds light in the dark.
+function inkMesh(list, w, h, pw, ph, draw) {
+  const k = pw <= 256 ? 4 : 2;
+  const tex = canvasTex(pw * k, ph * k, () => {});
+  const m = add(world, P(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: list === uvMarks ? THREE.NormalBlending : THREE.AdditiveBlending, toneMapped: false }), 0, 0, 0, { cast: false, receive: false });
+  m.userData.noRay = true;
+  const redraw = () => redrawTex(tex, (g) => { g.scale(k, g.canvas.height / ph); g.inkScale = k; draw(g, pw, ph); });
   redraw(); levelRedraws.push(redraw);
+  return m;
+}
+function inkMark(list, side, a, y, w, h, pw, ph, draw, o = 0.004) {
+  const m = inkMesh(list, w, h, pw, ph, draw);
+  m.position.copy(SIDES[side].at(a, y, o)); m.rotation.y = SIDES[side].rot;
+  const mark = { mesh: m, tex: m.material.map, wp: m.position.clone(), v: 0 };
   list.push(mark);
   return mark;
 }
 function inkMarkFlat(list, x, y, z, w, h, pw, ph, draw) {
-  const tex = canvasTex(pw, ph, () => {});
-  const m = add(world, P(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }), x, y, z, { cast: false, receive: false });
-  m.rotation.x = -Math.PI / 2; m.userData.noRay = true;
-  const redraw = () => redrawTex(tex, draw);
-  redraw(); levelRedraws.push(redraw);
-  const mark = { mesh: m, tex, wp: m.position.clone(), v: 0 };
+  const m = inkMesh(list, w, h, pw, ph, draw);
+  m.position.set(x, y, z); m.rotation.x = -Math.PI / 2;
+  const mark = { mesh: m, tex: m.material.map, wp: m.position.clone(), v: 0 };
   list.push(mark);
   return mark;
 }
-function inkText(text, color = '#c8fff0', shadow = '#7affd8', maxSize = 64) {
+function inkText(text, color = '#a8fff0', shadow = '#40ffd0', maxSize = 64, outline = '#05302e') {
+  const block = /^[\d↑↓. ]+$/.test(text);   // numbers and arrows use a bold block font: easier to read than handwriting
   return (g, w, h) => {
     let size = maxSize;
-    do { g.font = `${size}px Caveat, "Segoe Print", cursive`; size -= 2; } while (g.measureText(text).width > w - 40 && size > 16);
-    g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.shadowColor = shadow; g.shadowBlur = 18; g.fillStyle = color; g.fillText(text, w / 2, h / 2);
-    g.shadowBlur = 0; g.fillText(text, w / 2, h / 2);
+    const font = s => block ? `900 ${s}px "Arial Black", Arial, sans-serif` : `${s}px Caveat, "Segoe Print", cursive`;
+    do { g.font = font(size); size -= 2; } while (g.measureText(text).width > w - 40 && size > 16);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.lineJoin = 'round';
+    g.shadowColor = shadow; g.shadowBlur = 6 * (g.inkScale || 1); g.fillStyle = color; g.fillText(text, w / 2, h / 2);
+    g.shadowBlur = 0;
+    if (outline) { g.strokeStyle = outline; g.lineWidth = Math.max(2, size * 0.09); g.strokeText(text, w / 2, h / 2); }
+    g.fillText(text, w / 2, h / 2);
   };
 }
-const glowText = (text, maxSize = 64) => inkText(text, '#e8ff9a', '#b8ff40', maxSize);
+const glowText = (text, maxSize = 64) => inkText(text, '#f0ffb0', '#b8ff40', maxSize, null);
 const uvMark = (...a) => inkMark(uvMarks, ...a);
 const glowMark = (...a) => inkMark(glowMarks, ...a);
 
@@ -2434,7 +2443,7 @@ function lvlLab() {
     g.fillStyle = '#f6f8f8'; g.fillRect(0, 0, w, h);
     g.strokeStyle = 'rgba(40,60,160,0.75)'; g.fillStyle = 'rgba(40,60,160,0.75)'; g.lineWidth = 4; g.font = '48px Caveat, cursive';
     g.fillText('H2O + C6H12O6 → ???', 60, 100); g.fillText('E = mc²  (not useful today)', 60, 180);
-    g.fillStyle = 'rgba(180,30,30,0.75)'; g.fillText('DO NOT DRINK THE SAMPLES', 520, 420);
+    g.fillStyle = 'rgba(180,30,30,0.75)'; g.fillText('DO NOT DRINK THE SAMPLES', 470, 430);
     g.strokeStyle = 'rgba(40,140,60,0.7)'; g.beginPath(); g.arc(800, 160, 60, 0, Math.PI * 2); g.stroke();
     noiseDots(g, w, h, 2000, 0.03, 0);
   });
