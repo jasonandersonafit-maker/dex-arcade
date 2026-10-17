@@ -835,20 +835,15 @@ function makeZombie(look = {}) {
   // Arms stretched forward, zombie style
   const arms = [-0.33, 0.33].map(x => {
     const sh = new THREE.Group(); sh.position.set(x, 0.62, 0); sh.rotation.x = look.human ? Math.PI : -Math.PI / 2; torso.add(sh);
+    if (look.face) sh.rotation.z = x < 0 ? -0.6 : 0.6;   // wave out to the sides so the arms don't hide the face
     box(0.15, 0.6, 0.15, shirt, sh, 0, -0.18, 0);
     box(0.13, 0.18, 0.13, skin, sh, 0, -0.55, 0);
     return sh;
   });
   const headPivot = new THREE.Group(); headPivot.position.y = 0.9; torso.add(headPivot);
-  box(0.38, 0.38, 0.38, skin, headPivot, 0, 0, 0, 'head');
-  // A real face photo from the face booth (people only)
-  if (look.face) {
-    const photo = new THREE.Mesh(new THREE.PlaneGeometry(0.37, 0.37), new THREE.MeshBasicMaterial({ map: look.face }));
-    photo.position.set(0, 0, 0.192);
-    photo.userData.part = 'head';
-    headPivot.add(photo);
-    parts.push(photo);
-  }
+  // People with a face from the face booth get a round head wearing the photo; everyone else a blocky head
+  const jaw = look.face ? buildPhotoHead(look.face, headPivot, parts) : null;
+  if (!look.face) box(0.38, 0.38, 0.38, skin, headPivot, 0, 0, 0, 'head');
   if (!look.face) for (const ex of [-0.09, 0.09]) {
     const eye = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.02), eyes);
     eye.position.set(ex, 0.05, 0.195);
@@ -857,7 +852,7 @@ function makeZombie(look = {}) {
   const mouth = new THREE.Mesh(new THREE.BoxGeometry(look.human ? 0.08 : 0.18, look.human ? 0.08 : 0.05, 0.02), mouthMat);
   mouth.position.set(0, -0.09, 0.195);
   if (!look.face) headPivot.add(mouth);
-  if (look.hair) {
+  if (look.hair && !look.face) {
     const hairMat = new THREE.MeshStandardMaterial({ color: look.hair, flatShading: true });
     box(0.4, 0.1, 0.4, hairMat, headPivot, 0, 0.22, 0, 'head');
     box(0.4, 0.25, 0.08, hairMat, headPivot, 0, 0.08, -0.17, 'head');
@@ -865,7 +860,7 @@ function makeZombie(look = {}) {
 
   z.userData = {
     id: nextId++,
-    legs, arms, torso, headPivot, parts, mats: [skin, shirt, pants],
+    legs, arms, torso, headPivot, jaw, talkSeed: Math.random() * 10, parts, mats: [skin, shirt, pants],
     hp: ZOMBIE_HP, dead: false, deadT: 0, hitT: 0,
     phase: Math.random() * 10,
     // Everything below gets a little tougher each level (gently, so it ramps up slowly)
@@ -1207,6 +1202,7 @@ function updatePeople(dt) {
     u.arms[0].rotation.x = Math.PI + Math.sin(u.phase * 1.5) * 0.4;
     u.arms[1].rotation.x = Math.PI - Math.sin(u.phase * 1.5) * 0.4;
     u.torso.position.y = 0.8 + Math.abs(s) * 0.06;
+    lookAndTalk(p);
     if (Math.abs(p.position.x) > 13) { scene.remove(p); people.splice(i, 1); }   // made it to safety
   }
 }
@@ -2031,17 +2027,79 @@ const MAX_FACES = 10;
 const FACE_ROOM = 'dexarcade-faces-family';
 let faces = [];
 try { faces = JSON.parse(localStorage.getItem('dexFaces') || '[]'); } catch (e) {}
+// Each face photo becomes: an upper face and a lower face (so the jaw can move), plus the skin and hair colors
+const FACE_SPLIT = 0.74;   // where the photo is cut for the jaw (0 = top, 1 = bottom): between the lips
 const faceTextures = [];
 function rebuildFaceTextures() {
   faceTextures.length = 0;
   for (const url of faces) {
+    const S = 256, canvas = document.createElement('canvas'); canvas.width = canvas.height = S;
+    const upper = new THREE.CanvasTexture(canvas), lower = new THREE.CanvasTexture(canvas);
+    for (const t of [upper, lower]) t.colorSpace = THREE.SRGBColorSpace;
+    upper.repeat.set(1, FACE_SPLIT); upper.offset.set(0, 1 - FACE_SPLIT);   // top part of the photo
+    lower.repeat.set(1, 1 - FACE_SPLIT); lower.offset.set(0, 0);            // bottom part (chin and lower lip)
+    const face = { upper, lower, skin: new THREE.Color(0xe0b090), hair: new THREE.Color(0x3a2a1a) };
     const img = new Image();
-    const tex = new THREE.Texture(img);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    img.onload = () => { tex.needsUpdate = true; };
+    img.onload = () => {
+      const g = canvas.getContext('2d');
+      g.drawImage(img, 0, 0, S, S);
+      // Sample the skin (both cheeks) and hair (top middle) so the rest of the head matches the photo
+      const avg = (x, y, w, h) => {
+        const d = g.getImageData(x, y, w, h).data; let r = 0, gg = 0, b = 0, n = 0;
+        for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; }
+        return [r / n / 255, gg / n / 255, b / n / 255];
+      };
+      const l = avg(S * 0.22, S * 0.58, S * 0.12, S * 0.1), rr = avg(S * 0.66, S * 0.58, S * 0.12, S * 0.1);
+      face.skin.setRGB((l[0] + rr[0]) / 2, (l[1] + rr[1]) / 2, (l[2] + rr[2]) / 2, THREE.SRGBColorSpace);
+      const h = avg(S * 0.38, 2, S * 0.24, S * 0.05);
+      face.hair.setRGB(h[0], h[1], h[2], THREE.SRGBColorSpace);
+      // Soft oval edges, so the photo blends into the head instead of looking like a square picture
+      g.globalCompositeOperation = 'destination-in';
+      g.save(); g.translate(S / 2, S * 0.52); g.scale(0.82, 1);
+      const grd = g.createRadialGradient(0, 0, S * 0.36, 0, 0, S * 0.52);
+      grd.addColorStop(0, 'rgba(0,0,0,1)'); grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd; g.fillRect(-S, -S, S * 2, S * 2);
+      g.restore();
+      upper.needsUpdate = lower.needsUpdate = true;
+    };
     img.src = url;
-    faceTextures.push(tex);
+    faceTextures.push(face);
   }
+}
+// A round head wearing the photo, with a jaw that can open
+function buildPhotoHead(face, pivot, parts) {
+  const R = 0.26, SPAN = 1.9, T0 = 0.5, TL = 1.75;   // a big cartoon head; how far around (SPAN) and down (T0..T0+TL) the photo wraps
+  const lit = (opts) => new THREE.MeshLambertMaterial({ emissive: 0xffffff, emissiveIntensity: 0.3, ...opts });
+  const holder = new THREE.Group(); holder.scale.set(1, 1.12, 1); holder.position.y = 0.1; pivot.add(holder);
+  const add = (mesh, parent = holder) => { mesh.userData.part = 'head'; parent.add(mesh); parts.push(mesh); return mesh; };
+  add(new THREE.Mesh(new THREE.SphereGeometry(R, 20, 14), lit({ color: face.skin, emissive: face.skin })));
+  const front = Math.PI / 2 - SPAN / 2;
+  add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.012, 20, 12, front, SPAN, T0, TL * FACE_SPLIT), lit({ map: face.upper, emissiveMap: face.upper, transparent: true })));
+  const jaw = new THREE.Group(); holder.add(jaw);
+  add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.012, 20, 5, front, SPAN, T0 + TL * FACE_SPLIT, TL * (1 - FACE_SPLIT)), lit({ map: face.lower, emissiveMap: face.lower, transparent: true })), jaw);
+  // The inside of the mouth shows when the jaw drops
+  holder.add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.004, 12, 4, Math.PI / 2 - 0.4, 0.8, T0 + TL * FACE_SPLIT - 0.03, 0.24), new THREE.MeshBasicMaterial({ color: 0x2a0508 })));
+  // Hair on top and around the back
+  const hairMat = lit({ color: face.hair, emissive: face.hair });
+  add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.03, 20, 6, 0, Math.PI * 2, 0, T0 + 0.06), hairMat));
+  add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.03, 16, 10, Math.PI / 2 + SPAN / 2, Math.PI * 2 - SPAN, 0, 1.55), hairMat));
+  return jaw;
+}
+// People turn their heads to look at you, and their mouth moves while they yell HELP!
+const lookTmp = new THREE.Vector3();
+function lookAndTalk(p) {
+  const u = p.userData;
+  camera.getWorldPosition(lookTmp);
+  let yaw = Math.atan2(lookTmp.x - p.position.x, lookTmp.z - p.position.z) - p.rotation.y;
+  yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+  // The upper body twists toward you (so the arms stay out of the way), and the head turns the rest of the way
+  const twist = THREE.MathUtils.clamp(yaw, -1.4, 1.4);
+  u.torso.rotation.y = twist;
+  u.headPivot.rotation.y = THREE.MathUtils.clamp(yaw - twist, -1.4, 1.4);
+  const t = clock.elapsedTime * 1.6 + (u.talkSeed || 0);
+  const yelling = (t % 1) < 0.6;   // "HEL-P!" ... breath ... "HEL-P!"
+  if (u.jaw) u.jaw.rotation.x = yelling ? Math.abs(Math.sin(t * Math.PI * 5)) * 0.22 : 0;
+  if (u.bubble) { const s = yelling ? 1.1 : 1; u.bubble.scale.set(0.8 * s, 0.4 * s, 1); }
 }
 rebuildFaceTextures();
 const $id = (id) => document.getElementById(id);
@@ -2342,6 +2400,7 @@ function updateReplicas(dt) {
       u.legs[0].rotation.x = s * 0.8; u.legs[1].rotation.x = -s * 0.8;
       u.arms[0].rotation.x = Math.PI + Math.sin(u.phase * 1.5) * 0.4;
       u.arms[1].rotation.x = Math.PI - Math.sin(u.phase * 1.5) * 0.4;
+      lookAndTalk(e);
     } else {
       const air = e.position.y > 0.05 && !d[10];
       u.legs[0].rotation.x = air ? -0.7 : s * 0.6;
