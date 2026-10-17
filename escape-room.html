@@ -24,6 +24,8 @@
   #cross { position:fixed; left:50%; top:50%; width:6px; height:6px; margin:-3px 0 0 -3px; border-radius:50%; background:rgba(255,255,255,.6); pointer-events:none; }
   #cross.hot { width:10px; height:10px; margin:-5px 0 0 -5px; background:transparent; border:2px solid var(--gold); }
   #prompt { position:fixed; left:0; right:0; top:calc(50% + 22px); text-align:center; font-size:10px; color:var(--gold); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
+  #zoomHint { position:fixed; left:0; right:0; bottom:64px; text-align:center; font-size:9px; color:var(--fg); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; line-height:1.8; }
+  canvas.zoomed { cursor:crosshair; }
   #toast { position:fixed; left:50%; top:70px; transform:translateX(-50%); max-width:min(620px, calc(100vw - 32px)); box-sizing:border-box;
            background:rgba(16,12,9,.88); border:2px solid #4a3a26; padding:12px 16px; font-size:10px; line-height:1.8; text-align:center; pointer-events:none; }
   #reader { position:fixed; inset:0; display:grid; place-items:center; align-content:center; gap:14px; background:rgba(0,0,0,.72); padding:16px; }
@@ -64,6 +66,7 @@
 <div id="inv" hidden></div>
 <div id="cross" hidden></div>
 <div id="prompt" hidden></div>
+<div id="zoomHint" hidden>CLICK THE BUTTONS · OR TYPE NUMBERS ON YOUR KEYBOARD · ESC OR RIGHT-CLICK TO STEP BACK</div>
 <div id="toast" hidden></div>
 <div id="reader" hidden><img id="readerImg" alt="A handwritten note"><p>CLICK OR PRESS E TO PUT IT DOWN</p></div>
 <button id="pauseBtn" class="mc" type="button" hidden>❚❚ PAUSE</button>
@@ -991,7 +994,7 @@ function setPrompt(text) {
   if (text === promptText) return;
   promptText = text;
   $('prompt').textContent = text;
-  $('prompt').hidden = !text || renderer.xr.isPresenting || state !== 'play';
+  $('prompt').hidden = !text || renderer.xr.isPresenting || state !== 'play' || zoom.active;
   $('cross').classList.toggle('hot', !!text);
   if (text) drawPanelText(vrPrompt, text, { color: '#e0b45a', size: 44, bg: 'rgba(16,12,9,0.75)' });
   vrPrompt.mesh.visible = !!text && renderer.xr.isPresenting;
@@ -1616,7 +1619,7 @@ function makeLevers(side, a, y, { count = 4, pattern, onOpen }) {
   const W = 0.14 * count + 0.08;
   add(g, RB(W, 0.36, 0.03, 0.01), M.darkSteel, 0, 0, 0.015);
   for (let i = 0; i < count; i++) for (const sy of [-1, 1]) add(g, B(0.03, 0.04, 0.004), std({ color: sy > 0 ? 0x2a6a2a : 0x6a2a2a, roughness: 0.6 }), -W / 2 + 0.11 + i * 0.14, sy * 0.15, 0.032);
-  const state2 = { up: Array(count).fill(false), done: false };
+  const state2 = { up: Array(count).fill(false), done: false, group: g };
   for (let i = 0; i < count; i++) {
     const x = -W / 2 + 0.11 + i * 0.14;
     add(g, B(0.03, 0.22, 0.01), M.black, x, 0, 0.033);
@@ -1629,7 +1632,7 @@ function makeLevers(side, a, y, { count = 4, pattern, onOpen }) {
     interact([rod, ball], () => state2.done ? null : `Push lever ${i + 1} ${state2.up[i] ? 'down' : 'up'}`, () => {
       state2.up[i] = !state2.up[i]; sfx.lever();
       if (state2.up.every((u, k) => u === pattern()[k])) { state2.done = true; later(() => { sfx.unlock(); onOpen(); }, 300); }
-    });
+    }, { levers: state2 });
     let v = 0;
     updaters.push(dt => { v += ((state2.up[i] ? 1 : 0) - v) * Math.min(1, dt * 10); piv.rotation.x = 2.3 - 1.9 * v + (v > 0.5 ? 0 : 0); });
   }
@@ -1640,7 +1643,7 @@ function makePadlock(parent, pos, { code, onOpen }) {
   const g = new THREE.Group(); g.position.copy(pos); parent.add(g);
   add(g, RB(0.1, 0.075, 0.028, 0.01), M.brass, 0, 0, 0);
   const shackle = add(g, new THREE.TorusGeometry(0.03, 0.006, 8, 20, Math.PI), M.steel, 0, 0.037, 0);
-  const pl = { digits: [0, 0, 0], done: false };
+  const pl = { digits: [0, 0, 0], done: false, group: g };
   const side = std({ color: 0x1a1a1a, roughness: 0.5 });
   const dials = [-0.028, 0, 0.028].map((x, i) => {
     const tex = canvasTex(64, 96, () => {});
@@ -2736,7 +2739,9 @@ function loadLevel(n) {
   shadowFrames = 3;
   if (!fontsReady) { const tok = levelToken; fontsPromise.then(() => { if (tok === levelToken) levelRedraws.forEach(f => f()); }); }
 }
+const zoomC = new THREE.Vector3(), zoomN = new THREE.Vector3(), zoomEye = new THREE.Vector3(), zoomQ = new THREE.Quaternion(), zoomM = new THREE.Matrix4();
 function startLevel(n) {
+  exitZoom(false); zoom.v = 0; zoom.obj = null;
   loadLevel(n);
   state = 'play'; paused = false; playT = 0; hintsUsed = 0; hintKey = ''; hintIdx = 0;
   player.pos.set(R.start.x, 0, R.start.z); player.vel.set(0, 0, 0);
@@ -2767,7 +2772,7 @@ function levelComplete() {
     $('winTitle').textContent = last ? 'You Escaped the Mansion!' : `Level ${n} Complete!`;
     $('winTime').textContent = line + (last ? ' · You beat all 10 rooms!' : '');
     $('nextBtn').textContent = last ? 'Play Level 1 Again' : `Next: Level ${n + 1}`;
-    $('win').hidden = false; $('toast').hidden = true;
+    $('win').hidden = false; $('toast').hidden = true; $('zoomHint').hidden = true;
     $('hud').hidden = true; $('inv').hidden = true; $('cross').hidden = true; $('pauseBtn').hidden = true;
     renderer.domElement.classList.remove('playing');
     if (document.pointerLockElement) document.exitPointerLock();
@@ -2776,7 +2781,7 @@ function levelComplete() {
 function nextLevel() { startLevel(levelNum >= LEVELS.length ? 1 : levelNum + 1); }
 function showLevelSelect() {
   state = 'intro'; paused = false;
-  ['win', 'pauseMenu', 'hud', 'inv', 'cross', 'pauseBtn', 'toast', 'prompt'].forEach(id => $(id).hidden = true);
+  ['win', 'pauseMenu', 'hud', 'inv', 'cross', 'pauseBtn', 'toast', 'prompt', 'zoomHint'].forEach(id => $(id).hidden = true);
   $('intro').hidden = false;
   buildLevelGrid();
   renderer.domElement.classList.remove('playing');
@@ -2802,10 +2807,14 @@ function useFreeLook() {
 }
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
-  if (!locked && !freeLook && state === 'play' && !paused && !renderer.xr.isPresenting) setPaused(true);
+  if (locked && !zoom.active) $('zoomHint').hidden = true;
+  if (!locked && !freeLook && state === 'play' && !paused && !renderer.xr.isPresenting && !zoom.active) setPaused(true);
 });
+const mouseNDC = new THREE.Vector2();
 addEventListener('mousemove', e => {
   mouseX = e.clientX;
+  mouseNDC.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  if (zoom.active) return;   // zoomed in on a lock: the mouse moves a pointer instead of looking around
   if (!locked && !(freeLook && state === 'play' && !paused)) return;
   const k = radiansPerPixel();
   player.yaw -= e.movementX * k;
@@ -2816,14 +2825,55 @@ document.documentElement.addEventListener('mouseleave', e => {
   mouseX = x <= innerWidth * 0.15 ? 0 : x >= innerWidth * 0.85 ? innerWidth : null;
 });
 let hot = null;   // the thing you're pointing at
+
+// ---------- Zooming in on locks (PC only) ----------
+// Using a keypad, padlock or lever panel moves the camera up close so the buttons are easy to click.
+const zoom = { active: false, v: 0, obj: null, dist: 0.3, isDone: null, kp: null, pl: null, dial: 0, doneT: 0 };
+function lockOf(h) {
+  if (!h) return null;
+  if (h.keypad) return { obj: h.keypad.group, dist: 0.3, isDone: () => h.keypad.done, kp: h.keypad };
+  if (h.padlock) return { obj: h.padlock.group, dist: 0.22, isDone: () => h.padlock.done, pl: h.padlock };
+  if (h.levers) return { obj: h.levers.group, dist: 0.75, isDone: () => h.levers.done };
+  return null;
+}
+function enterZoom(lk) {
+  Object.assign(zoom, { active: true, obj: lk.obj, dist: lk.dist, isDone: lk.isDone, kp: lk.kp || null, pl: lk.pl || null, dial: 0, doneT: 0 });
+  sfx.click();
+  if (document.pointerLockElement) document.exitPointerLock();   // free the mouse so you can click buttons
+  renderer.domElement.classList.remove('playing');
+  renderer.domElement.classList.add('zoomed');
+  $('cross').hidden = true; $('prompt').hidden = true;
+  $('zoomHint').textContent = zoom.pl ? 'CLICK A DIAL TO TURN IT · OR TYPE THE NUMBERS · E OR ESC TO STEP BACK'
+    : zoom.kp ? 'CLICK THE BUTTONS · OR TYPE NUMBERS ON YOUR KEYBOARD · E OR ESC TO STEP BACK'
+    : 'CLICK A LEVER TO PULL IT · E OR ESC TO STEP BACK';
+  $('zoomHint').hidden = false;
+}
+function exitZoom(relock) {
+  if (!zoom.active) return;
+  zoom.active = false;
+  $('zoomHint').hidden = true;
+  renderer.domElement.classList.remove('zoomed');
+  if (state === 'play') { renderer.domElement.classList.add('playing'); $('cross').hidden = renderer.xr.isPresenting; }
+  if (relock) lockMouse();
+  else if (state === 'play' && !freeLook && !renderer.xr.isPresenting) { $('zoomHint').textContent = 'CLICK TO LOOK AROUND AGAIN'; $('zoomHint').hidden = false; }
+}
 function useThing(h = hot) {
   if (state !== 'play' || paused) return;
   if (reading) { closeReader(); return; }
-  if (h) { h.act(); shadowFrames = 2; }
+  if (!h) return;
+  const lk = !renderer.xr.isPresenting && !zoom.active && lockOf(h);
+  if (lk && !lk.isDone()) { enterZoom(lk); return; }   // first click zooms in, then you press the buttons
+  h.act(); shadowFrames = 2;
 }
+renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
 renderer.domElement.addEventListener('mousedown', e => {
-  if (e.button !== 0 || renderer.xr.isPresenting) return;
-  if (state !== 'play' || paused) return;
+  if (renderer.xr.isPresenting || state !== 'play' || paused) return;
+  if (zoom.active) {
+    if (e.button === 2) exitZoom(true);
+    else if (e.button === 0) useThing();
+    return;
+  }
+  if (e.button !== 0) return;
   if (!locked && !freeLook) { lockMouse(); return; }
   useThing();
 });
@@ -2836,6 +2886,18 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyP') { setPaused(!paused); if (!paused) lockMouse(); return; }
   if (paused || state !== 'play') return;
   const digit = /^(Digit|Numpad)(\d)$/.exec(e.code);
+  if (zoom.active) {
+    if (e.code === 'Escape' || e.code === 'KeyE' || ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(e.code)) { exitZoom(true); return; }   // E toggles the zoom
+    if (zoom.kp) {
+      if (digit) { pressKey(zoom.kp, digit[2]); return; }
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') { pressKey(zoom.kp, 'OK'); return; }
+      if (e.code === 'Backspace') { pressKey(zoom.kp, 'C'); return; }
+    }
+    if (zoom.pl && digit) {   // typing fills the dials left to right
+      const i = hot?.padlock === zoom.pl ? hot.dial : zoom.dial;
+      zoom.pl.set(i, +digit[2]); zoom.dial = (i + 1) % 3; return;
+    }
+  }
   if (e.code === 'KeyE') useThing();
   else if (e.code === 'KeyF') toggleUV();
   else if (e.code === 'KeyH') useHint();
@@ -2860,6 +2922,7 @@ redrawTex(pauseSign.tex, (g, w, h) => {
 function setPaused(p) {
   if (state === 'intro') return;
   if (state === 'escaped' && p) return;
+  if (p) exitZoom(false);
   paused = p;
   $('pauseMenu').hidden = !p || renderer.xr.isPresenting;
   pauseSign.mesh.visible = p && renderer.xr.isPresenting;
@@ -2932,7 +2995,8 @@ for (let i = 0; i < 2; i++) {
   controllers.push(c);
 }
 renderer.xr.addEventListener('sessionstart', () => {
-  ['hud', 'cross', 'inv', 'pauseBtn', 'prompt', 'toast', 'reader', 'pauseMenu', 'intro', 'win'].forEach(id => $(id).hidden = true);
+  exitZoom(false); zoom.v = 0;
+  ['hud', 'cross', 'inv', 'pauseBtn', 'prompt', 'toast', 'reader', 'pauseMenu', 'intro', 'win', 'zoomHint'].forEach(id => $(id).hidden = true);
   pcTorch.visible = false; pcLantern.visible = false;
   if (state !== 'play') startLevel(state === 'escaped' ? Math.min(LEVELS.length, levelNum + 1) : progress.unlocked);
   const session = renderer.xr.getSession();
@@ -2994,7 +3058,8 @@ function updatePointing(inVR) {
       }
       hot = null;
     } else {
-      raycaster.setFromCamera(center, camera);
+      camera.updateMatrixWorld();
+      raycaster.setFromCamera(zoom.active ? mouseNDC : center, camera);   // zoomed in: point with the mouse
       const r = pickRay(raycaster.ray.origin.clone(), raycaster.ray.direction.clone(), REACH);
       hot = r.h;
       if (hot) { now.add(hot); label = hot.label(); }
@@ -3016,7 +3081,7 @@ const fwd = new THREE.Vector3(), right = new THREE.Vector3();
 let thunderT = 12 + rnd() * 20, flashT = -1, wristT = 0;
 loadLevel(Math.min(progress.unlocked, LEVELS.length));   // a room to look at behind the menu
 player.pos.set(R.start.x, 0, R.start.z);
-if (location.search.includes('debug')) window.__dbg = { player, get flags() { return flags; }, inv, get handlers() { return handlers; }, startLevel, useHint, toggleUV, pressKey, get keypads() { return keypads; }, get hot() { return hot; }, useThing, get state() { return state; }, get reading() { return reading; }, closeReader, get R() { return R; }, frame: (n = 1, dt = 1 / 60) => { const g = clock.getDelta; clock.getDelta = () => dt; for (let i = 0; i < n; i++) frame(); clock.getDelta = g; } };
+if (location.search.includes('debug')) window.__dbg = { player, get flags() { return flags; }, inv, get handlers() { return handlers; }, startLevel, useHint, toggleUV, pressKey, get keypads() { return keypads; }, get hot() { return hot; }, useThing, get state() { return state; }, get reading() { return reading; }, closeReader, get R() { return R; }, get zoom() { return zoom; }, frame: (n = 1, dt = 1 / 60) => { const g = clock.getDelta; clock.getDelta = () => dt; for (let i = 0; i < n; i++) frame(); clock.getDelta = g; } };
 
 renderer.setAnimationLoop(frame);
 function frame() {
@@ -3106,6 +3171,22 @@ function frame() {
     const bob = Math.sin(player.walkPhase * 2) * 0.02 * Math.min(1, Math.hypot(player.vel.x, player.vel.z) / 2);
     camera.position.set(0, EYE + bob, 0);
     camera.rotation.set(player.pitch, player.yaw, 0);
+    // Zoom in on a lock: glide from your eyes to just in front of it
+    zoom.v += ((zoom.active ? 1 : 0) - zoom.v) * Math.min(1, dt * 6);
+    if (zoom.v > 0.001 && zoom.obj) {
+      const e = zoom.v * zoom.v * (3 - 2 * zoom.v);
+      rig.updateMatrixWorld(); zoom.obj.updateMatrixWorld();
+      const c = zoom.obj.getWorldPosition(zoomC);
+      const n = zoomN.set(0, 0, 1).transformDirection(zoom.obj.matrixWorld);
+      const eye = zoomEye.copy(c).addScaledVector(n, zoom.dist);
+      zoomQ.setFromRotationMatrix(zoomM.lookAt(eye, c, V3(0, 1, 0)));
+      zoomQ.premultiply(rig.quaternion.clone().invert());
+      camera.position.lerp(rig.worldToLocal(eye.clone()), e);
+      camera.quaternion.slerp(zoomQ, e);
+    }
+    pcTorch.visible = inv.has('uv') && zoom.v < 0.2;
+    pcLantern.visible = inv.has('lantern') && zoom.v < 0.2;
+    if (zoom.active && zoom.isDone()) { zoom.doneT += dt; if (zoom.doneT > 1.3) exitZoom(false); }   // unlocked: step back
   }
   for (const c of controllers) c.userData.laser.visible = inVR && state === 'play' && !paused;
   updatePointing(inVR);
