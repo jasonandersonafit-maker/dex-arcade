@@ -390,7 +390,7 @@ function drawScreen(cab, t) {
         g.beginPath(); g.moveTo(w / 2, h); g.lineTo(((t * 18 + 55) % (w + 30)) - 24, 74); g.stroke();
       }
       g.fillStyle = '#7dff6b'; g.font = '8px "Press Start 2P", monospace'; g.textAlign = 'center';
-      if (Math.floor(t * 2) % 2 === 0) g.fillText('PRESS START', w / 2, 110);
+      if (Math.floor(t * 2) % 2 === 0) g.fillText('GET AWAY!', w / 2, 110);
     } else if (game.screen === 'escape') {
       // A locked door in a dark study: the keypad blinks, then the door swings open
       g.fillStyle = '#1f3428'; g.fillRect(0, 0, w, h);                                   // green wallpaper

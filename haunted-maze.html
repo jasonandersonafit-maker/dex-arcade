@@ -46,6 +46,11 @@
   .levels { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
   .levels button.mc { padding:8px 4px; font-size:14px; line-height:1.6; }
   .levels button.mc:disabled { opacity:.45; cursor:not-allowed; background:#2a2630; }
+  .codeRow { display:flex; justify-content:center; align-items:center; gap:8px; font-size:9px; color:var(--muted); flex-wrap:wrap; }
+  .codeRow input { font:inherit; font-size:12px; width:90px; text-align:center; letter-spacing:.2em; color:var(--fg); background:#1a161e; border:3px solid #000; padding:8px; }
+  .codeRow input:focus { outline:2px solid var(--ghost); }
+  .codeRow button.mc { font-size:10px; padding:8px 12px; }
+  #codeMsg { color:var(--ghost); }
   #levelName { color:var(--ghost); font-size:9px; }
   #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
   @media (prefers-reduced-motion: reduce) { #flash { transition:none; } }
@@ -69,6 +74,12 @@
     <p>PICK A LEVEL:</p>
     <div class="levels" id="levels"></div>
     <p id="levelName"></p>
+    <form id="codeForm" class="codeRow" autocomplete="off">
+      <label for="codeInput">SECRET CODE:</label>
+      <input id="codeInput" inputmode="numeric" maxlength="8" placeholder="····">
+      <button class="mc" type="submit">OK</button>
+    </form>
+    <p id="codeMsg" hidden></p>
     <p class="warn">You can't die... it just wants to scare you. Pick how scary you want it:</p>
     <div class="controls">
       <div><b>PC</b>Mouse: look around<br>W A S D: move<br>Space: jump<br>P: pause</div>
@@ -1063,6 +1074,16 @@ function renderLevelPicker() {
   $('levelName').textContent = `LEVEL ${pickedLevel}: ${P.name} · ${P.keys} KEYS`;
 }
 renderLevelPicker();
+// Secret code on the start screen: unlocks every level
+const UNLOCK_CODE = '7656';
+$('codeForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = $('codeInput').value.trim();
+  $('codeInput').value = '';
+  $('codeMsg').hidden = false;
+  if (v === UNLOCK_CODE) { progress.unlocked = 4; saveProgress(); renderLevelPicker(); $('codeMsg').textContent = 'CODE ACCEPTED! ALL 4 LEVELS UNLOCKED.'; }
+  else $('codeMsg').textContent = 'WRONG CODE.';
+});
 document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') setPaused(true); });
 
 // ---------- VR controllers ----------

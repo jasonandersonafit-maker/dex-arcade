@@ -44,6 +44,11 @@
   .sens input { width:100%; accent-color:#a8543a; }
   a.back { font-size:9px; color:var(--muted); }
   #pauseBtn { position:fixed; right:16px; top:16px; font-size:9px; padding:8px 10px; }
+  .codeRow { display:flex; justify-content:center; align-items:center; gap:8px; font-size:9px; color:var(--muted); flex-wrap:wrap; }
+  .codeRow input { font:inherit; font-size:12px; width:90px; text-align:center; letter-spacing:.2em; color:var(--fg); background:rgba(0,0,0,.45); border:2px solid #000; padding:8px; }
+  .codeRow input:focus { outline:2px solid var(--gold); }
+  .codeRow button.mc, #roundPick button.mc { font-size:10px; padding:8px 12px; }
+  #codeMsg { color:var(--gold); }
 </style>
 </head>
 <body>
@@ -65,6 +70,17 @@
       <div><b>QUEST</b>Swing your arm to attack<br>(harder swings hit harder)<br>Block with the shield on your<br>left arm (or your sword)<br>Shove it as they hit: PARRY!<br>Left stick: move · Y: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">ENTER THE ARENA</button>
+    <div id="roundPick" class="foes" hidden>
+      <button class="mc" type="button" data-round="0">FIGHT 1</button>
+      <button class="mc" type="button" data-round="1">FIGHT 2</button>
+      <button class="mc" type="button" data-round="2">FIGHT 3</button>
+    </div>
+    <form id="codeForm" class="codeRow" autocomplete="off">
+      <label for="codeInput">SECRET CODE:</label>
+      <input id="codeInput" inputmode="numeric" maxlength="8" placeholder="····">
+      <button class="mc" type="submit">OK</button>
+    </form>
+    <p id="codeMsg" hidden></p>
     <a class="back" href="index.html">← Back to Arcade</a>
   </div>
 </div>
@@ -471,7 +487,8 @@ function startRound(i) {
   fanfare([392, 523, 659]);
   cheer();
 }
-function startGame() {
+function startGame(startAt = 0) {
+  if (typeof startAt !== 'number') startAt = 0;   // (when called from a click event)
   $('intro').hidden = true;
   for (const id of ['round', 'foe', 'you', 'cross']) $(id).hidden = renderer.xr.isPresenting;
   $('pauseBtn').hidden = false;
@@ -480,7 +497,7 @@ function startGame() {
   startCrowd();
   document.activeElement?.blur();
   fightT = 0;
-  startRound(0);
+  startRound(startAt);
   lockMouse();
 }
 function updateHud() {
@@ -809,6 +826,17 @@ function goToArcade() {
 }
 $('arcadeBtn').addEventListener('click', goToArcade);
 $('playBtn').addEventListener('click', startGame);
+// Secret code on the start screen: lets you pick which knight to fight
+const UNLOCK_CODE = '7656';
+$('codeForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = $('codeInput').value.trim();
+  $('codeInput').value = '';
+  $('codeMsg').hidden = false;
+  if (v === UNLOCK_CODE) { $('codeMsg').textContent = 'CODE ACCEPTED! PICK A FIGHT:'; $('roundPick').hidden = false; fanfare([523, 659, 784]); }
+  else $('codeMsg').textContent = 'WRONG CODE.';
+});
+for (const b of $('roundPick').querySelectorAll('button')) b.addEventListener('click', () => startGame(+b.dataset.round));
 document.addEventListener('visibilitychange', () => { if (document.hidden && state !== 'intro') setPaused(true); });
 
 // ---------- VR: a real sword in your right hand ----------
