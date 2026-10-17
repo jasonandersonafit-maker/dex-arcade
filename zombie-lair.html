@@ -73,7 +73,7 @@
   <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>Y</b> button on Quest.</p>
 </div>
 <button id="pauseBtn" type="button">❚❚ Pause</button>
-<button id="facesBtn" type="button">📸 Faces</button>
+<button id="facesBtn" type="button" hidden>📸 Faces</button>
 <div id="faceBooth" hidden>
   <div class="card">
     <h2>FACE BOOTH</h2>
@@ -639,8 +639,9 @@ const bannerCanvas = document.createElement('canvas');
 bannerCanvas.width = 1024; bannerCanvas.height = 256;
 const bannerTex = new THREE.CanvasTexture(bannerCanvas);
 const banner = new THREE.Mesh(new THREE.PlaneGeometry(6, 1.5),
-  new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  new THREE.MeshBasicMaterial({ map: bannerTex, transparent: true, opacity: 0, depthWrite: false, depthTest: false, fog: false }));
 banner.position.set(0, 3, -9.7);
+banner.renderOrder = 900;   // always drawn in front, so the giant Zombie King can't hide it
 scene.add(banner);
 let bannerT = 0;
 function showBanner(title, sub, color = '#7dff6b') {
@@ -913,6 +914,7 @@ function updateKingWaves(dt) {
     if (kingWave < KING_WAVES.length) {
       kingWave++;
       waveQueue = Math.round(KING_WAVES[kingWave - 1] * (coop ? COOP_WAVES : 1)); waveTimer = 0.3;
+      banner.position.y = 4.6;   // above the King's head
       showBanner(`WAVE ${kingWave}/${KING_WAVES.length}`, 'the King summons his army!', '#b07dff');
       kingRoar();
     } else {
@@ -1139,7 +1141,7 @@ let personTimer = 4;
 function spawnPerson(net = null) {
   const li = net ? net.li : Math.floor(Math.random() * PEOPLE_LOOKS.length);
   const look = PEOPLE_LOOKS[li];
-  // Wear one of the family's faces from the face booth (if any were taken)
+  // Each person wears one of the drawn faces (the same one on every co-op headset)
   const fi = net ? (net.fi ?? 0) : Math.floor(Math.random() * 1000);
   const face = faceTextures.length ? faceTextures[fi % faceTextures.length] : null;
   const p = makeZombie({ ...look, eyes: 0x111111, human: true, face });
@@ -1376,6 +1378,7 @@ function clearVictory() {
 function startNextLevel() {
   level++;
   levelKills = 0;
+  banner.position.y = 3;   // back to its normal height (it goes up during the King's waves)
   bossSpawned = false;
   kingBoss = null; kingWave = 0; waveQueue = 0;
   if (isBossLevel(level)) {
@@ -1420,6 +1423,7 @@ function playerHit(amount = 1, fromFriend = false) {
 }
 
 function restart() {
+  banner.position.set(0, 3, -9.7);
   for (const z of zombies) scene.remove(z);
   zombies.length = 0;
   for (const p of people) scene.remove(p);
@@ -2030,43 +2034,9 @@ try { faces = JSON.parse(localStorage.getItem('dexFaces') || '[]'); } catch (e) 
 // Each face photo becomes: an upper face and a lower face (so the jaw can move), plus the skin and hair colors
 const FACE_SPLIT = 0.74;   // where the photo is cut for the jaw (0 = top, 1 = bottom): between the lips
 const faceTextures = [];
-function rebuildFaceTextures() {
-  faceTextures.length = 0;
-  for (const url of faces) {
-    const S = 256, canvas = document.createElement('canvas'); canvas.width = canvas.height = S;
-    const upper = new THREE.CanvasTexture(canvas), lower = new THREE.CanvasTexture(canvas);
-    for (const t of [upper, lower]) t.colorSpace = THREE.SRGBColorSpace;
-    upper.repeat.set(1, FACE_SPLIT); upper.offset.set(0, 1 - FACE_SPLIT);   // top part of the photo
-    lower.repeat.set(1, 1 - FACE_SPLIT); lower.offset.set(0, 0);            // bottom part (chin and lower lip)
-    const face = { upper, lower, skin: new THREE.Color(0xe0b090), hair: new THREE.Color(0x3a2a1a) };
-    const img = new Image();
-    img.onload = () => {
-      const g = canvas.getContext('2d');
-      g.drawImage(img, 0, 0, S, S);
-      // Sample the skin (both cheeks) and hair (top middle) so the rest of the head matches the photo
-      const avg = (x, y, w, h) => {
-        const d = g.getImageData(x, y, w, h).data; let r = 0, gg = 0, b = 0, n = 0;
-        for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; n++; }
-        return [r / n / 255, gg / n / 255, b / n / 255];
-      };
-      const l = avg(S * 0.22, S * 0.58, S * 0.12, S * 0.1), rr = avg(S * 0.66, S * 0.58, S * 0.12, S * 0.1);
-      face.skin.setRGB((l[0] + rr[0]) / 2, (l[1] + rr[1]) / 2, (l[2] + rr[2]) / 2, THREE.SRGBColorSpace);
-      const h = avg(S * 0.38, 2, S * 0.24, S * 0.05);
-      face.hair.setRGB(h[0], h[1], h[2], THREE.SRGBColorSpace);
-      // Soft oval edges, so the photo blends into the head instead of looking like a square picture
-      g.globalCompositeOperation = 'destination-in';
-      g.save(); g.translate(S / 2, S * 0.52); g.scale(0.82, 1);
-      const grd = g.createRadialGradient(0, 0, S * 0.36, 0, 0, S * 0.52);
-      grd.addColorStop(0, 'rgba(0,0,0,1)'); grd.addColorStop(1, 'rgba(0,0,0,0)');
-      g.fillStyle = grd; g.fillRect(-S, -S, S * 2, S * 2);
-      g.restore();
-      upper.needsUpdate = lower.needsUpdate = true;
-    };
-    img.src = url;
-    faceTextures.push(face);
-  }
-}
-// A round head wearing the photo, with a jaw that can open
+// People have regular square heads now: no photo or drawn faces, so this list stays empty
+function rebuildFaceTextures() { faceTextures.length = 0; }
+// A round head wearing a drawn face, with a jaw that can open
 function buildPhotoHead(face, pivot, parts) {
   const R = 0.26, SPAN = 1.9, T0 = 0.5, TL = 1.75;   // a big cartoon head; how far around (SPAN) and down (T0..T0+TL) the photo wraps
   const lit = (opts) => new THREE.MeshLambertMaterial({ emissive: 0xffffff, emissiveIntensity: 0.3, ...opts });
@@ -2217,8 +2187,8 @@ $id('snapBtn').addEventListener('click', snapFace);
 $id('sendFacesBtn').addEventListener('click', sendFaces);
 $id('closeFacesBtn').addEventListener('click', closeFaceBooth);
 renderer.xr.addEventListener('sessionstart', () => { $id('facesBtn').hidden = true; });
-renderer.xr.addEventListener('sessionend', () => { $id('facesBtn').hidden = false; });
-setTimeout(checkForFaces, 1500);
+// (People now wear drawn faces, so the photo booth button is hidden and the game no longer listens for photos.)
+if (location.search.includes('debug')) window.__z = { spawnPerson, faceTextures, camera, rig, scene, renderer };
 
 // ---------- Co-op: your friend, and keeping both games in step ----------
 let inMenu = true;   // the play solo / host / join menu shows first
