@@ -941,6 +941,7 @@ function respawn(countFall) {
 // Starts (or restarts) the level that's loaded
 function startGame() {
   state = 'play'; paused = false; timerRunning = false; time = 0; falls = 0; cpIndex = 0;
+  flying = false; flewThisRun = false;
   resetCourseParts();
   beams.forEach(b => { b.material = beamMatOff; });
   respawn(false);
@@ -964,7 +965,7 @@ function startLevel(n) {
 function nextLevel() { startLevel(level >= LEVEL_COUNT ? 1 : level + 1); }
 function finish() {
   state = 'done'; doneT = 0; timerRunning = false;
-  const newBest = time > 0 && (best === null || time < best);
+  const newBest = time > 0 && !flewThisRun && (best === null || time < best);   // flying doesn't count for best times
   if (newBest) { best = time; progress.best[level] = time; }
   if (level < LEVEL_COUNT) progress.unlocked = Math.max(progress.unlocked, level + 1);
   saveProgress();
@@ -1060,16 +1061,26 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (!locked && !freeLook && state === 'play' && !paused) lockMouse();
 });
 
-// Secret code: 7656 unlocks every level
+// Secret codes: 7656 unlocks every level, 7655 turns flying on/off (then double-tap jump to fly)
+let flyAllowed = false, flying = false, flewThisRun = false, jumpWas = false, lastJumpTap = -9;
+try { flyAllowed = localStorage.getItem('parkourFly') === 'on'; } catch (e) {}
+const FLY_SPEED = 7;
 $('codeForm').addEventListener('submit', e => {
   e.preventDefault();
-  const ok = $('codeInput').value.trim() === '7656';
-  if (ok) { progress.unlocked = LEVEL_COUNT; saveProgress(); renderLevelPicker(); }
-  $('codeMsg').textContent = ok ? 'CODE ACCEPTED! ALL LEVELS UNLOCKED.' : 'WRONG CODE.';
+  const v = $('codeInput').value.trim();
+  let text = 'WRONG CODE.', ok = false;
+  if (v === '7656') { progress.unlocked = LEVEL_COUNT; saveProgress(); renderLevelPicker(); text = 'CODE ACCEPTED! ALL LEVELS UNLOCKED.'; ok = true; }
+  else if (v === '7655') {
+    flyAllowed = !flyAllowed; if (!flyAllowed) flying = false; ok = true;
+    try { localStorage.setItem('parkourFly', flyAllowed ? 'on' : 'off'); } catch (e) {}
+    text = flyAllowed ? 'FLYING ON! DOUBLE-TAP JUMP TO FLY.' : 'FLYING OFF.';
+  }
+  $('codeMsg').textContent = text;
   $('codeMsg').className = ok ? 'ok' : 'bad';
   $('codeMsg').hidden = false;
   $('codeInput').value = '';
 });
+if (flyAllowed) { $('codeMsg').textContent = 'FLYING IS ON (TYPE 7655 AGAIN TO TURN IT OFF)'; $('codeMsg').className = 'ok'; $('codeMsg').hidden = false; }
 const typingInBox = () => { const a = document.activeElement; return !!a && (a.tagName === 'INPUT' && a.type !== 'range' || a.tagName === 'TEXTAREA'); };
 
 const keys = {};
@@ -1146,10 +1157,10 @@ renderer.xr.addEventListener('sessionend', () => {
   arm.visible = true; vrHud.visible = false;
   if (state !== 'intro') { $('hud').hidden = false; $('cross').hidden = false; if (state === 'play') setPaused(true); }
 });
-const vrInput = { fx: 0, sx: 0, jump: false };
+const vrInput = { fx: 0, sx: 0, jump: false, down: false };
 function readVR() {
   const out = vrInput;
-  out.fx = 0; out.sx = 0; out.jump = false;
+  out.fx = 0; out.sx = 0; out.jump = false; out.down = false;
   for (const c of controllers) {
     const src = c.userData.input, pad = src?.gamepad;
     if (!pad) continue;
@@ -1158,7 +1169,8 @@ function readVR() {
       out.sx = ax[2]; out.fx = -ax[3];
     }
     if (src.handedness === 'right' && ax.length >= 4) {
-      if (pad.buttons[4]?.pressed) out.jump = true;                       // A: jump
+      if (pad.buttons[4]?.pressed) out.jump = true;                       // A: jump (double-tap to fly, hold to fly up)
+      if (ax[3] > 0.5) out.down = true;                                   // pull the right stick back: fly down
       const b = !!pad.buttons[5]?.pressed;                                // B: back to checkpoint
       if (b && !c.userData.bWas && state === 'play' && !paused) respawn(false);
       c.userData.bWas = b;
@@ -1218,12 +1230,13 @@ function frame() {
     if (state === 'done') doneT += dt;
 
     // ----- Movement -----
-    let fx = 0, sx = 0, jump = false;
-    if (inVR) ({ fx, sx, jump } = vr);
+    let fx = 0, sx = 0, jump = false, down = false;
+    if (inVR) ({ fx, sx, jump, down } = vr);
     else {
       if (keys.KeyW) fx += 1; if (keys.KeyS) fx -= 1;
       if (keys.KeyD) sx += 1; if (keys.KeyA) sx -= 1;
       jump = !!keys.Space;
+      down = !!(keys.ShiftLeft || keys.ShiftRight || keys.KeyC);
       if (keys.ArrowLeft) player.yaw += 2.2 * dt;
       if (keys.ArrowRight) player.yaw -= 2.2 * dt;
       if (keys.ArrowUp) player.pitch = Math.min(1.55, player.pitch + 1.6 * dt);
@@ -1242,12 +1255,26 @@ function frame() {
     wish.set(0, 0, 0).addScaledVector(fwd, fx).addScaledVector(right, sx);
     if (wish.lengthSq() > 1) wish.normalize();
     if (wish.lengthSq() > 0.01 && state === 'play') timerRunning = true;   // clock starts when you first move
+    // Flying (secret code 7655): double-tap jump to start or stop flying
+    if (jump && !jumpWas && flyAllowed && state === 'play') {
+      if (t - lastJumpTap < 0.35) {
+        flying = !flying; lastJumpTap = -9;
+        if (flying) { flewThisRun = true; player.vel.y = 0; }
+        showMessage(flying ? 'FLYING!' : 'FLYING OFF', flying ? (inVR ? 'hold A to go up · pull the right stick back to go down' : 'hold SPACE to go up · SHIFT to go down') : 'double-tap jump to fly again', '#33f0ff', 2);
+        beep(flying ? 880 : 440, 0.15, 'square', 0.08);
+      } else lastJumpTap = t;
+    }
+    jumpWas = jump;
     const onIce = player.onGround && blocksUnderFeet().has(ICE);
-    const accel = player.onGround ? (onIce ? ICE_GRIP : GROUND_GRIP) : AIR_GRIP;
+    const accel = flying ? 8 : player.onGround ? (onIce ? ICE_GRIP : GROUND_GRIP) : AIR_GRIP;
     const k = Math.min(1, accel * dt);
-    player.vel.x += (wish.x * WALK_SPEED - player.vel.x) * k;
-    player.vel.z += (wish.z * WALK_SPEED - player.vel.z) * k;
-    if (jump && player.onGround) { player.vel.y = JUMP_SPEED; player.onGround = false; noise(0.08, 'lowpass', 500, 0.12); timerRunning = state === 'play'; }
+    const topSpeed = flying ? FLY_SPEED : WALK_SPEED;
+    player.vel.x += (wish.x * topSpeed - player.vel.x) * k;
+    player.vel.z += (wish.z * topSpeed - player.vel.z) * k;
+    if (flying) {
+      player.vel.y += (((jump ? 1 : 0) - (down ? 1 : 0)) * FLY_SPEED - player.vel.y) * k;
+      if (jump || down) timerRunning = state === 'play';
+    } else if (jump && player.onGround) { player.vel.y = JUMP_SPEED; player.onGround = false; noise(0.08, 'lowpass', 500, 0.12); timerRunning = state === 'play'; }
 
     // Standing on a moving platform carries you along with it
     const pl = player.onPlat;
@@ -1257,7 +1284,7 @@ function frame() {
 
     const steps = Math.ceil(dt / 0.008), sdt = dt / steps;
     for (let s = 0; s < steps; s++) {
-      player.vel.y = Math.max(-40, player.vel.y - GRAVITY * sdt);   // gravity every step, so standing is always detected
+      if (!flying) player.vel.y = Math.max(-40, player.vel.y - GRAVITY * sdt);   // gravity every step, so standing is always detected
       player.onGround = false; player.onPlat = null;
       moveAxis('x', player.vel.x * sdt);
       moveAxis('z', player.vel.z * sdt);
