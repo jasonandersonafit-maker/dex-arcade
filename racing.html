@@ -40,10 +40,32 @@
   #results { font-size:10px; line-height:2; text-align:left; }
   #results .you { color:var(--gold); }
   .buttons { display:flex; justify-content:center; flex-wrap:wrap; gap:12px; }
+  #trackName { font-size:9px; color:var(--muted); }
+  #big.name { white-space:pre-line; color:#fff; font-size:clamp(14px, 4vw, 28px); line-height:1.6; }
+  /* Track picker: buttons 1-5 (locked ones show a lock) */
+  .tracks { display:flex; justify-content:center; flex-wrap:wrap; gap:8px; }
+  .tracks button.mc { font-size:14px; padding:8px 6px; width:84px; line-height:1.5; }
+  .tracks button.mc small { display:block; font-size:6px; color:var(--muted); margin-top:4px; }
+  .tracks button.mc.sel { background:#3d8bff; box-shadow: inset -3px -3px 0 #1a4aa8, inset 3px 3px 0 #8ab8ff; }
+  .tracks button.mc:disabled { background:#3a3a3a; color:#888; cursor:default; }
+  .tracks button.mc:disabled:hover { background:#3a3a3a; }
+  #trackInfo { font-size:9px; color:var(--gold); }
+  #trackBar { position:fixed; left:0; right:0; top:12px; z-index:60; display:flex; flex-direction:column; align-items:center; gap:6px;
+              font-size:9px; text-shadow:2px 2px 0 #000; padding:0 16px; }
+  @media (max-width: 520px) { .tracks button.mc { width:56px; font-size:11px; } }
+  /* Secret code box */
+  .code { display:flex; justify-content:center; align-items:center; gap:8px; font-size:8px; color:var(--muted); margin:0; }
+  .code input { font:inherit; font-size:12px; width:96px; padding:8px; text-align:center; letter-spacing:4px; color:#fff;
+                background:#1a2238; border:3px solid #000; outline:2px solid #3a5a8a; }
+  .code input:focus { outline-color:var(--gold); }
+  .code button.mc { font-size:10px; padding:8px 12px; }
+  #codeMsg { font-size:9px; color:var(--gold); }
+  #codeMsg.bad { color:var(--red); }
 </style>
 </head>
 <body>
 <div id="hud" hidden>
+  <div id="trackName"></div>
   <div id="pos">4TH</div>
   <div id="lap">LAP 1/3</div>
   <div id="time">0:00.00</div>
@@ -57,7 +79,15 @@
 <div id="intro" class="overlay">
   <div class="card">
     <h1>KART RACE</h1>
-    <p>Race 3 laps against 3 bot drivers on the Dex Arcade Grand Prix track. Hit the glowing arrows for a speed boost, fly off the big ramp, and drift through corners to charge up a turbo!</p>
+    <p>Race 3 laps against 3 bot drivers. Hit the glowing arrows for a speed boost, fly off the big ramp, and drift through corners to charge up a turbo! Finish in the top 3 to unlock the next track.</p>
+    <div id="trackInfo"></div>
+    <div id="trackPick" class="tracks"></div>
+    <form id="codeForm" class="code" autocomplete="off">
+      <label for="codeInput">SECRET CODE</label>
+      <input id="codeInput" type="text" inputmode="numeric" maxlength="8" spellcheck="false">
+      <button id="codeBtn" class="mc" type="submit">OK</button>
+    </form>
+    <div id="codeMsg" hidden></div>
     <div class="controls">
       <div><b>PC</b>W / ↑: gas · S / ↓: brake<br>A D / ← →: steer<br>Space: drift (let go for turbo)<br>R: back on the track<br>P: pause</div>
       <div><b>QUEST</b>Right trigger: gas<br>Left trigger: brake / reverse<br>Left stick: steer<br>Grip: drift · B: reset<br>A: re-center seat · Y: pause</div>
@@ -65,6 +95,12 @@
     <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
     <a class="back" href="index.html">← Back to Arcade</a>
   </div>
+</div>
+
+<!-- Shown under the play alone / host / join menu so you can still pick a track there -->
+<div id="trackBar" hidden>
+  <div id="trackBarInfo"></div>
+  <div id="trackBarPick" class="tracks"></div>
 </div>
 
 <div id="pauseMenu" class="overlay" hidden>
@@ -81,6 +117,7 @@
     <h2 id="finishTitle">FINISHED!</h2>
     <div id="results"></div>
     <div class="buttons">
+      <button id="nextBtn" class="mc" type="button" hidden>NEXT TRACK</button>
       <button id="againBtn" class="mc" type="button">RACE AGAIN</button>
       <button id="menuBtn" class="mc" type="button">MENU</button>
       <button id="endArcadeBtn" class="mc" type="button">BACK TO ARCADE</button>
@@ -101,7 +138,7 @@ import { createMultiplayer } from './multiplayer.js';
 
 // ---------- Settings you can tweak ----------
 const LAPS = 3;
-const ROAD_WIDTH = 14;           // meters
+// (each track has its own road width: see TRACKS below)
 const MAX_SPEED = 26;            // meters per second on the road (about 94 km/h)
 const OFFROAD_SPEED = 11;        // top speed on the grass
 const BOOST_SPEED = 36;          // top speed while boosting
@@ -187,7 +224,9 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x6a8a4a, 1.6));
+// Just two lights for every track (each track changes their colors)
+const hemi = new THREE.HemisphereLight(0xffffff, 0x6a8a4a, 1.6);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
 sun.position.set(80, 140, 40);
 scene.add(sun);
@@ -202,34 +241,55 @@ function canvasTex(w, h, draw, pixel = true) {
   return t;
 }
 
-// Sky: a big gradient dome
-{
-  const tex = canvasTex(4, 256, (g, w, h) => {
-    const grd = g.createLinearGradient(0, 0, 0, h);
-    grd.addColorStop(0, '#2a6ad8'); grd.addColorStop(0.5, '#6aaaf0'); grd.addColorStop(1, '#d8ecff');
-    g.fillStyle = grd; g.fillRect(0, 0, w, h);
-  }, false);
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(600, 24, 12), new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false }));
-  scene.add(sky);
-}
-
-// ---------- The track ----------
-// The middle of the road goes through these points (in meters), as one smooth loop.
-const TRACK_POINTS = [
-  [-40, 0], [20, 0], [70, -2], [105, 15], [118, 50], [100, 82], [60, 88], [30, 110], [0, 140],
-  [-45, 145], [-85, 125], [-95, 85], [-70, 60], [-100, 35], [-95, 8], [-70, 0],
+// ---------- The tracks ----------
+// Five tracks, each harder than the one before. Each one is a loop of points (in meters, x and z) that the
+// middle of the road goes through, plus its own road width, hills, sky, scenery and how fast the bots are.
+//   width:  how wide the road is (narrower = harder)
+//   hills:  [height in meters, how many hills per lap] (the road goes up and down)
+//   botMul: bot speed multiplier (1.1 = the bots are 10% faster)
+const TRACKS = [
+  { name: 'DEX ARCADE GP', place: 'SUNNY PARK', width: 14, botMul: 1.0, hills: [],
+    points: [[-40, 0], [20, 0], [70, -2], [105, 15], [118, 50], [100, 82], [60, 88], [30, 110], [0, 140],
+      [-45, 145], [-85, 125], [-95, 85], [-70, 60], [-100, 35], [-95, 8], [-70, 0]],
+    sky: ['#2a6ad8', '#6aaaf0', '#d8ecff'], fog: [0xbfe0ff, 120, 420], hemi: [0xffffff, 0x6a8a4a, 1.6], sun: [0xfff2d8, 2.2],
+    ground: ['#5aa83a', '#4f9a32', '#6ab846'], curb: ['#e8242a', '#ffffff'], tire: 0xe8242a, roof: 0xe8242a, banner: '#1a2a6a',
+    scenery: sceneryPark },
+  { name: 'DESERT CANYON', place: 'HOT SANDY CANYON', width: 13, botMul: 1.03, hills: [[3, 2]],
+    points: [[-60, 0], [40, 0], [110, -10], [150, 20], [150, 70], [120, 100], [80, 95], [55, 120], [70, 160],
+      [40, 195], [-20, 190], [-50, 150], [-30, 115], [-70, 90], [-110, 60], [-105, 20]],
+    sky: ['#e8783a', '#f4b46a', '#ffe8c0'], fog: [0xf0c890, 140, 460], hemi: [0xfff0d8, 0xb07840, 1.5], sun: [0xffe0b0, 2.4],
+    ground: ['#e0b070', '#d4a060', '#ecc080'], curb: ['#ff7a1a', '#ffffff'], tire: 0xff7a1a, roof: 0xc8501a, banner: '#6a2a0a',
+    scenery: sceneryDesert },
+  { name: 'SNOWY PEAKS', place: 'FROSTY MOUNTAIN PASS', width: 12, botMul: 1.06, hills: [[6, 2], [2, 5]],
+    points: [[-50, 0], [30, 0], [80, 10], [110, 45], [95, 80], [130, 110], [120, 160], [75, 170], [50, 135],
+      [10, 130], [-20, 165], [-70, 170], [-100, 130], [-80, 95], [-115, 60], [-100, 20]],
+    sky: ['#5a7aa8', '#a8c0dc', '#eef4fa'], fog: [0xdfe8f0, 80, 340], hemi: [0xf0f6ff, 0x8a9ab0, 1.5], sun: [0xffffff, 1.9],
+    ground: ['#f4f8fc', '#e4ecf4', '#ffffff'], curb: ['#2a6ae8', '#ffffff'], tire: 0x2a6ae8, roof: 0x2a6ae8, banner: '#0a2a5a',
+    scenery: scenerySnow },
+  { name: 'NEON NIGHT CITY', place: 'CITY STREETS AT NIGHT', width: 11, botMul: 1.09, hills: [[2, 1]],
+    points: [[-60, 0], [60, 0], [84, 8], [92, 30], [92, 46], [80, 60], [92, 74], [92, 95], [84, 118], [60, 126],
+      [30, 126], [15, 140], [0, 152], [-15, 140], [-30, 126], [-60, 126], [-84, 118], [-92, 95], [-92, 30], [-84, 8]],
+    sky: ['#05051a', '#1a1040', '#4a2a6a'], stars: true, fog: [0x1a1030, 60, 300], hemi: [0x8a8aff, 0x2a2a3a, 0.8], sun: [0xb0c0ff, 0.7],
+    ground: ['#2a2a32', '#26262e', '#30303a'], curb: ['#ffd23d', '#1a1a1a'], glowCurb: true, tire: 0xffd23d, roof: 0xff3dd2, banner: '#1a0a3a',
+    scenery: sceneryCity },
+  { name: 'VOLCANO BEACH', place: 'TROPICAL VOLCANO ISLAND', width: 10, botMul: 1.12, hills: [[7, 3]],
+    points: [[-50, 0], [30, 0], [70, -15], [110, 0], [120, 35], [95, 60], [60, 55], [40, 75], [55, 105], [100, 115],
+      [120, 150], [90, 185], [30, 180], [0, 150], [-30, 175], [-80, 175], [-110, 140], [-85, 105], [-115, 70], [-110, 25]],
+    sky: ['#6a1a3a', '#e8603a', '#ffc080'], fog: [0xe0805a, 100, 430], hemi: [0xffe0c0, 0x8a5a3a, 1.4], sun: [0xffb070, 2.1],
+    ground: ['#f0d8a0', '#e8cc90', '#f8e4b0'], curb: ['#e8242a', '#1a1a1a'], tire: 0xff5a1a, roof: 0x2aa86a, banner: '#3a0a0a',
+    groundDisc: true, scenery: sceneryVolcano },
 ];
-const curve = new THREE.CatmullRomCurve3(TRACK_POINTS.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
-const TRACK_LEN = curve.getLength();
-const N = Math.round(TRACK_LEN / 0.8);          // number of samples around the track
-const SEG = TRACK_LEN / N;                       // meters between samples
-const P = curve.getSpacedPoints(N).slice(0, N);  // road middle
-const T = [], NL = [];                           // direction of travel, and "left" sideways
-for (let i = 0; i < N; i++) {
-  const t = P[(i + 1) % N].clone().sub(P[(i - 1 + N) % N]).setY(0).normalize();
-  T.push(t);
-  NL.push(new THREE.Vector3(t.z, 0, -t.x));
-}
+const TRACK_COUNT = TRACKS.length;
+
+// Everything below describes the track that is built right now (buildTrack fills it in)
+let TRACK = 1, curTrack = TRACKS[0];
+let ROAD_WIDTH = 14;             // meters
+let WALL = ROAD_WIDTH / 2 + 4.2; // how far from the middle the tire walls are
+let TRACK_LEN = 0, N = 0, SEG = 1;
+let P = [], T = [], NL = [], PH = [];   // road middle, direction of travel, "left" sideways, hill height
+let maxHill = 0, trackGroup = null;
+let rampStart = 0, PADS = [];
+let minX = 0, maxX = 0, minZ = 0, maxZ = 0, mapScale = 1, trackCX = 0, trackCZ = 0, trackR = 0;
 const wrap = (i) => ((i % N) + N) % N;
 // Smoothly blend between samples for a position like 123.4
 function trackAt(s, out, side = 0) {
@@ -239,6 +299,13 @@ function trackAt(s, out, side = 0) {
   return out;
 }
 const yawOf = (t) => Math.atan2(-t.x, -t.z);   // the kart heading that points along direction t
+// Hill height of the road at a spot like 123.4 (0 on flat tracks)
+function hillAt(s) {
+  const i0 = Math.floor(s), f = s - i0;
+  return PH[wrap(i0)] * (1 - f) + PH[wrap(i0 + 1)] * f;
+}
+// How steep the road is there (meters up per meter forward)
+const slopeAt = (s) => (hillAt(s + 3) - hillAt(s - 3)) / (6 * SEG);
 
 // How much the road turns over the next stretch (used to find straights, and by the bots to slow for corners)
 function turnAhead(i, len) {
@@ -249,37 +316,24 @@ function turnAhead(i, len) {
 
 // The jump ramp goes on the straightest stretch (not too close to the start line)
 const RAMP_LEN = 14, RAMP_H = 2.4;
-let rampStart = 0;
-{
-  let best = Infinity;
-  for (let i = Math.floor(N * 0.25); i < Math.floor(N * 0.9); i += 2) {
-    const turn = turnAhead(i, 70);
-    if (turn < best) { best = turn; rampStart = i + 12; }
-  }
-}
-// Height of the ground under a kart (only the ramp sticks up)
+// Height of the ground under a kart (hills, and the ramp sticks up)
 function groundHeight(sf, lat) {
-  if (Math.abs(lat) > ROAD_WIDTH / 2 + 0.2) return 0;
+  const h = hillAt(sf);
+  if (Math.abs(lat) > ROAD_WIDTH / 2 + 0.2) return h;
   const k = ((sf - rampStart) % N + N) % N;
-  return k < RAMP_LEN ? RAMP_H * k / RAMP_LEN : 0;
+  return h + (k < RAMP_LEN ? RAMP_H * k / RAMP_LEN : 0);
 }
 
 // Boost pads: glowing arrows in the road
 const PAD_LEN = 8;
-const PADS = [
-  { i: Math.floor(N * 0.12), lane: 0 },
-  { i: Math.floor(N * 0.42), lane: 3 },
-  { i: Math.floor(N * 0.66), lane: -3 },
-  { i: wrap(rampStart - 30), lane: 0 },
-];
 
-// Build a flat strip that follows the track, from "inner" to "outer" meters sideways
+// Build a flat strip that follows the track (and its hills), from "inner" to "outer" meters sideways
 function trackStrip(inner, outer, y, vScale, from = 0, count = N, heightFn = null) {
   const pos = [], uv = [], idx = [];
   let dist = 0;
   for (let k = 0; k <= count; k++) {
     const i = wrap(from + k);
-    const h = heightFn ? heightFn(k) : 0;
+    const h = (heightFn ? heightFn(k) : 0) + PH[i];
     const a = P[i].clone().addScaledVector(NL[i], inner), b = P[i].clone().addScaledVector(NL[i], outer);
     pos.push(a.x, y + h, a.z, b.x, y + h, b.z);
     uv.push(0, dist / vScale, 1, dist / vScale);
@@ -294,178 +348,421 @@ function trackStrip(inner, outer, y, vScale, from = 0, count = N, heightFn = nul
   return geo;
 }
 
-// Grass
-{
-  const tex = canvasTex(64, 64, (g) => {
-    for (let y = 0; y < 64; y += 4) for (let x = 0; x < 64; x += 4) {
-      const v = Math.random();
-      g.fillStyle = v < 0.5 ? '#5aa83a' : v < 0.85 ? '#4f9a32' : '#6ab846'; g.fillRect(x, y, 4, 4);
-    }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(120, 120);
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshLambertMaterial({ map: tex }));
-  grass.rotation.x = -Math.PI / 2;
-  grass.position.set(10, 0, 70);
-  scene.add(grass);
-}
-// Road (asphalt with a dashed middle line)
-{
-  const tex = canvasTex(64, 128, (g, w, h) => {
-    for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
-      const v = 70 + Math.random() * 22 | 0; g.fillStyle = `rgb(${v},${v},${v + 4})`; g.fillRect(x, y, 2, 2);
-    }
-    g.fillStyle = '#f4f4f4'; g.fillRect(31, 0, 2, h / 2);
-    g.fillStyle = '#e8e8e8'; g.fillRect(1, 0, 2, h); g.fillRect(w - 3, 0, 2, h);
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  scene.add(new THREE.Mesh(trackStrip(ROAD_WIDTH / 2, -ROAD_WIDTH / 2, 0.02, 12), new THREE.MeshLambertMaterial({ map: tex })));
-  // Red and white curbs on both edges
-  const curbTex = canvasTex(4, 16, (g) => { g.fillStyle = '#e8242a'; g.fillRect(0, 0, 4, 8); g.fillStyle = '#ffffff'; g.fillRect(0, 8, 4, 8); });
-  curbTex.wrapS = curbTex.wrapT = THREE.RepeatWrapping;
-  const curbMat = new THREE.MeshLambertMaterial({ map: curbTex });
-  scene.add(new THREE.Mesh(trackStrip(ROAD_WIDTH / 2 + 1.4, ROAD_WIDTH / 2, 0.03, 3), curbMat));
-  scene.add(new THREE.Mesh(trackStrip(-ROAD_WIDTH / 2, -ROAD_WIDTH / 2 - 1.4, 0.03, 3), curbMat));
-}
-// Tire walls along both sides
-const WALL = ROAD_WIDTH / 2 + 4.2;     // how far from the middle the walls are
-{
-  const tireGeo = new THREE.TorusGeometry(0.42, 0.2, 6, 10);
-  const spots = [];
-  for (let i = 0; i < N; i += 3) for (const side of [-1, 1]) spots.push([i, side]);
-  const tires = new THREE.InstancedMesh(tireGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), spots.length * 2);
-  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
-  let n = 0;
-  const clear = (ROAD_WIDTH / 2 + 2.6) ** 2;   // tires must stay off the road and curbs
-  for (const [i, side] of spots) {
-    const base = P[i].clone().addScaledVector(NL[i], side * (WALL + 0.4));
-    // On the inside of tight corners the wall line folds back over the road: leave those tires out
-    let onRoad = false;
-    for (let j = 0; j < N; j += 2) if ((P[j].x - base.x) ** 2 + (P[j].z - base.z) ** 2 < clear) { onRoad = true; break; }
-    if (onRoad) continue;
-    for (let layer = 0; layer < 2; layer++) {
-      e.set(Math.PI / 2, 0, 0); q.setFromEuler(e);
-      v.copy(base).setY(0.2 + layer * 0.38);
-      m.compose(v, q, one);
-      tires.setMatrixAt(n, m);
-      tires.setColorAt(n, new THREE.Color((i / 3 + layer) % 4 === 0 ? 0xe8242a : 0x262626));
-      n++;
-    }
+// Things every track shares (made once, never thrown away)
+const keep = new Set();
+const shared = (x) => { keep.add(x); return x; };
+const roadTex = shared(canvasTex(64, 128, (g, w, h) => {
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
+    const v = 70 + Math.random() * 22 | 0; g.fillStyle = `rgb(${v},${v},${v + 4})`; g.fillRect(x, y, 2, 2);
   }
-  tires.count = n;   // only draw the tires we actually placed
-  scene.add(tires);
-}
-// The jump ramp: yellow and black stripes
-{
-  const tex = canvasTex(16, 16, (g) => {
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { g.fillStyle = ((x + y) >> 2) % 2 ? '#1a1a1a' : '#ffd23d'; g.fillRect(x, y, 1, 1); }
-  });
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  const mat = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide });
-  const top = trackStrip(ROAD_WIDTH / 2, -ROAD_WIDTH / 2, 0.04, 3, rampStart, RAMP_LEN, (k) => RAMP_H * k / RAMP_LEN);
-  scene.add(new THREE.Mesh(top, mat));
-  // Front face where you fly off, and the two sides
-  const end = wrap(rampStart + RAMP_LEN);
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_WIDTH, RAMP_H), new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide }));
-  face.position.copy(P[end]).setY(RAMP_H / 2);
-  face.rotation.y = yawOf(T[end]);
-  scene.add(face);
-  for (const side of [-1, 1]) {
-    const pos = [];
-    for (let k = 0; k < RAMP_LEN; k++) {
-      const a = P[wrap(rampStart + k)].clone().addScaledVector(NL[wrap(rampStart + k)], side * ROAD_WIDTH / 2);
-      const b = P[wrap(rampStart + k + 1)].clone().addScaledVector(NL[wrap(rampStart + k + 1)], side * ROAD_WIDTH / 2);
-      const ha = RAMP_H * k / RAMP_LEN, hb = RAMP_H * (k + 1) / RAMP_LEN;
-      pos.push(a.x, 0, a.z, b.x, 0, b.z, b.x, hb, b.z, a.x, 0, a.z, b.x, hb, b.z, a.x, ha, a.z);
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.computeVertexNormals();
-    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide })));
-  }
-}
-// Boost pads
-const padTex = canvasTex(32, 32, (g) => {
+  g.fillStyle = '#f4f4f4'; g.fillRect(31, 0, 2, h / 2);
+  g.fillStyle = '#e8e8e8'; g.fillRect(1, 0, 2, h); g.fillRect(w - 3, 0, 2, h);
+}));
+roadTex.wrapS = roadTex.wrapT = THREE.RepeatWrapping;
+const roadMat = shared(new THREE.MeshLambertMaterial({ map: roadTex }));
+const padTex = shared(canvasTex(32, 32, (g) => {
   g.fillStyle = '#0a3a6a'; g.fillRect(0, 0, 32, 32);
   g.fillStyle = '#3df0ff';
   for (const y of [4, 18]) { g.beginPath(); g.moveTo(16, y); g.lineTo(28, y + 10); g.lineTo(22, y + 10); g.lineTo(16, y + 5); g.lineTo(10, y + 10); g.lineTo(4, y + 10); g.fill(); }
-});
+}));
 padTex.wrapT = THREE.RepeatWrapping;
 padTex.repeat.set(1, 2);
-for (const pad of PADS) {
-  const mid = wrap(pad.i + PAD_LEN / 2);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(4, PAD_LEN * SEG), new THREE.MeshBasicMaterial({ map: padTex }));
-  m.rotation.order = 'YXZ';
-  m.rotation.set(-Math.PI / 2, yawOf(T[mid]), 0);
-  m.position.copy(P[mid]).addScaledVector(NL[mid], pad.lane).setY(0.05);
-  scene.add(m);
-}
-// Start / finish line, with a big arch over it
-{
-  const checker = canvasTex(16, 4, (g) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 4; y++) { g.fillStyle = (x + y) % 2 ? '#111' : '#fff'; g.fillRect(x, y, 1, 1); } });
-  const line = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_WIDTH, 2.2), new THREE.MeshLambertMaterial({ map: checker }));
-  line.rotation.order = 'YXZ';
-  line.rotation.set(-Math.PI / 2, yawOf(T[0]), 0);
-  line.position.copy(P[0]).setY(0.04);
-  scene.add(line);
-  const arch = new THREE.Group();
-  arch.position.copy(P[0]);
-  arch.rotation.y = yawOf(T[0]);
-  const postMat = new THREE.MeshLambertMaterial({ color: 0xe8e8e8 });
-  for (const x of [-ROAD_WIDTH / 2 - 1.5, ROAD_WIDTH / 2 + 1.5]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, 8, 0.8), postMat); post.position.set(x, 4, 0); arch.add(post);
-  }
-  const banner = new THREE.Mesh(new THREE.BoxGeometry(ROAD_WIDTH + 3.8, 1.8, 0.5), [postMat, postMat, postMat, postMat,
-    new THREE.MeshBasicMaterial({ map: canvasTex(512, 64, (g, w, h) => {
-      g.fillStyle = '#1a2a6a'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#ffd23d'; g.font = '28px "Press Start 2P", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText('DEX ARCADE GP', w / 2, h / 2 + 2);
-    }, false) }),
-    new THREE.MeshBasicMaterial({ map: canvasTex(512, 64, (g, w, h) => {
-      g.fillStyle = '#1a2a6a'; g.fillRect(0, 0, w, h);
-      g.fillStyle = '#ffffff'; g.font = '28px "Press Start 2P", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText('FINISH', w / 2, h / 2 + 2);
-    }, false) })]);
-  banner.position.y = 7.5;
-  arch.add(banner);
-  scene.add(arch);
-  // Grandstand full of fans next to the start
-  const crowdTex = canvasTex(64, 16, (g) => {
-    g.fillStyle = '#5a5a6a'; g.fillRect(0, 0, 64, 16);
-    for (let x = 1; x < 64; x += 3) for (let y = 1; y < 16; y += 5) { g.fillStyle = ['#e84a3a', '#3a7ae8', '#ffd23d', '#4ac84a', '#ffffff'][(x * 7 + y) % 5]; g.fillRect(x, y, 2, 3); }
+const padMat = shared(new THREE.MeshBasicMaterial({ map: padTex }));
+const rampTex = shared(canvasTex(16, 16, (g) => {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { g.fillStyle = ((x + y) >> 2) % 2 ? '#1a1a1a' : '#ffd23d'; g.fillRect(x, y, 1, 1); }
+}));
+rampTex.wrapS = rampTex.wrapT = THREE.RepeatWrapping;
+const rampMat = shared(new THREE.MeshLambertMaterial({ map: rampTex, side: THREE.DoubleSide }));
+const rampDark = shared(new THREE.MeshLambertMaterial({ color: 0x3a3a3a, side: THREE.DoubleSide }));
+const checkerMat = shared(new THREE.MeshLambertMaterial({ map: canvasTex(16, 4, (g) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 4; y++) { g.fillStyle = (x + y) % 2 ? '#111' : '#fff'; g.fillRect(x, y, 1, 1); } }) }));
+const postMat = shared(new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }));
+const crowdMat = shared(new THREE.MeshLambertMaterial({ map: canvasTex(64, 16, (g) => {
+  g.fillStyle = '#5a5a6a'; g.fillRect(0, 0, 64, 16);
+  for (let x = 1; x < 64; x += 3) for (let y = 1; y < 16; y += 5) { g.fillStyle = ['#e84a3a', '#3a7ae8', '#ffd23d', '#4ac84a', '#ffffff'][(x * 7 + y) % 5]; g.fillRect(x, y, 2, 3); }
+}) }));
+const tireGeo = shared(new THREE.TorusGeometry(0.42, 0.2, 6, 10));
+const tireMat = shared(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+const skyGeo = shared(new THREE.SphereGeometry(600, 24, 12));
+// Simple shapes that scenery stretches into trees, rocks, buildings...
+const BOX = shared(new THREE.BoxGeometry(1, 1, 1));
+const CYL = shared(new THREE.CylinderGeometry(1, 1, 1, 7));
+const CONE = shared(new THREE.ConeGeometry(1, 1, 8));
+const ROCK = shared(new THREE.DodecahedronGeometry(1, 0));
+const BALL = shared(new THREE.SphereGeometry(1, 8, 6));
+const trunkGeo = shared(new THREE.CylinderGeometry(0.35, 0.45, 2.4, 6)), leafGeo = shared(new THREE.ConeGeometry(2.4, 5.5, 8));
+const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
+
+// Throw away the old track's meshes so the headset doesn't run out of memory
+function disposeGroup(g) {
+  const junk = new Set();
+  g.traverse(o => {
+    if (o.geometry && !keep.has(o.geometry)) junk.add(o.geometry);
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) {
+      if (keep.has(m)) continue;
+      junk.add(m);
+      for (const t of [m.map, m.emissiveMap]) if (t && !keep.has(t)) junk.add(t);
+    }
+    if (o.isInstancedMesh) o.dispose();
   });
-  const stand = new THREE.Group();
-  for (let row = 0; row < 4; row++) {
-    const step = new THREE.Mesh(new THREE.BoxGeometry(40, 1.2, 2.2), [postMat, postMat, postMat, postMat, new THREE.MeshLambertMaterial({ map: crowdTex }), postMat]);
-    step.position.set(0, 0.6 + row * 1.2, -row * 2.2);
-    stand.add(step);
-  }
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(42, 0.4, 10), new THREE.MeshLambertMaterial({ color: 0xe8242a }));
-  roof.position.set(0, 8, -3.5); stand.add(roof);
-  const s = 12;
-  stand.position.copy(P[s]).addScaledVector(NL[s], -(WALL + 6));
-  stand.rotation.y = yawOf(T[s]) - Math.PI / 2;
-  scene.add(stand);
+  for (const x of junk) x.dispose();
+  scene.remove(g);
 }
-// Trees, kept well away from the road
-{
-  const trunkGeo = new THREE.CylinderGeometry(0.35, 0.45, 2.4, 6), leafGeo = new THREE.ConeGeometry(2.4, 5.5, 8);
+// Is this spot at least "dist" meters from the middle of the road everywhere?
+function clearOfRoad(x, z, dist, step = 2) {
+  const d2 = dist * dist;
+  for (let j = 0; j < N; j += step) if ((P[j].x - x) ** 2 + (P[j].z - z) ** 2 < d2) return false;
+  return true;
+}
+// Random spots away from the road: [x, z, size, random turn, random 0-1]
+// "clear" is how far from the road middle, "rad" adds that much per size (for big things)
+function scatter(count, clear, { margin = 90, minSc = 0.8, maxSc = 1.4, rad = 0, tries = 4000, inside = null } = {}) {
   const spots = [];
-  let tries = 0;
-  while (spots.length < 170 && tries++ < 4000) {
-    const x = -180 + Math.random() * 380, z = -90 + Math.random() * 330;
-    let ok = true;
-    for (let i = 0; i < N; i += 4) if ((P[i].x - x) ** 2 + (P[i].z - z) ** 2 < (WALL + 6) ** 2) { ok = false; break; }
-    if (ok) spots.push([x, z, 0.8 + Math.random() * 0.6]);
+  const skirt = maxHill ? maxHill * 2.5 + 2 : 0;   // stay off the hillsides next to the road
+  let n = 0;
+  while (spots.length < count && n++ < tries) {
+    const x = minX - margin + Math.random() * (maxX - minX + margin * 2), z = minZ - margin + Math.random() * (maxZ - minZ + margin * 2);
+    const sc = minSc + Math.random() * (maxSc - minSc);
+    if (inside && !inside(x, z)) continue;
+    if (clearOfRoad(x, z, clear + skirt + rad * sc, 4)) spots.push([x, z, sc, Math.random() * Math.PI * 2, Math.random()]);
   }
-  const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshLambertMaterial({ color: 0x6b4a2a }), spots.length);
-  const leaves = new THREE.InstancedMesh(leafGeo, new THREE.MeshLambertMaterial({ color: 0x2f7a2a }), spots.length);
-  const m = new THREE.Matrix4();
-  spots.forEach(([x, z, sc], n) => {
-    m.makeScale(sc, sc, sc).setPosition(x, 1.2 * sc, z); trunks.setMatrixAt(n, m);
-    m.makeScale(sc, sc, sc).setPosition(x, 5 * sc, z); leaves.setMatrixAt(n, m);
-  });
-  scene.add(trunks, leaves);
+  return spots;
 }
+// One InstancedMesh for lots of copies of the same thing (fast on Quest). place(matrix, item) sets each one.
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _s = new THREE.Vector3();
+function place(m, x, y, z, sx, sy, sz, ry = 0, rx = 0, rz = 0) {
+  _e.set(rx, ry, rz); _q.setFromEuler(_e);
+  return m.compose(_v.set(x, y, z), _q, _s.set(sx, sy, sz));
+}
+function inst(geo, mat, items, fill, colorOf = null) {
+  const im = new THREE.InstancedMesh(geo, mat, Math.max(1, items.length));
+  const m = new THREE.Matrix4(), c = new THREE.Color();
+  items.forEach((it, n) => {
+    fill(m, it, n); im.setMatrixAt(n, m);
+    if (colorOf) im.setColorAt(n, c.setHex(colorOf(it, n)));
+  });
+  im.count = items.length;
+  trackGroup.add(im);
+  return im;
+}
+function groundTex(colors) {
+  return canvasTex(64, 64, (g) => {
+    for (let y = 0; y < 64; y += 4) for (let x = 0; x < 64; x += 4) {
+      const v = Math.random();
+      g.fillStyle = v < 0.5 ? colors[0] : v < 0.85 ? colors[1] : colors[2]; g.fillRect(x, y, 4, 4);
+    }
+  });
+}
+
+// ---------- Build a track (and throw the old one away) ----------
+function buildTrack(n) {
+  n = THREE.MathUtils.clamp(n | 0 || 1, 1, TRACK_COUNT);
+  const tr = TRACKS[n - 1];
+  if (trackGroup) disposeGroup(trackGroup);
+  trackGroup = new THREE.Group();
+  scene.add(trackGroup);
+  TRACK = n; curTrack = tr;
+  ROAD_WIDTH = tr.width;
+  WALL = ROAD_WIDTH / 2 + 4.2;
+
+  // The middle of the road goes through the points, as one smooth loop
+  const curve = new THREE.CatmullRomCurve3(tr.points.map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
+  TRACK_LEN = curve.getLength();
+  N = Math.round(TRACK_LEN / 0.8);          // number of samples around the track
+  SEG = TRACK_LEN / N;                       // meters between samples
+  P = curve.getSpacedPoints(N).slice(0, N);  // road middle
+  T = []; NL = [];
+  for (let i = 0; i < N; i++) {
+    const t = P[(i + 1) % N].clone().sub(P[(i - 1 + N) % N]).setY(0).normalize();
+    T.push(t);
+    NL.push(new THREE.Vector3(t.z, 0, -t.x));
+  }
+  // Hills: smooth waves that start (and end) flat at the start line
+  PH = P.map((p, i) => tr.hills.reduce((h, [a, k]) => h + a * (0.5 - 0.5 * Math.cos(2 * Math.PI * k * i / N)), 0));
+  maxHill = Math.max(0, ...PH);
+  minX = Infinity; maxX = -Infinity; minZ = Infinity; maxZ = -Infinity;
+  for (const p of P) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
+  mapScale = 130 / Math.max(maxX - minX, maxZ - minZ);
+  trackCX = (minX + maxX) / 2; trackCZ = (minZ + maxZ) / 2;
+  trackR = 0; for (const p of P) trackR = Math.max(trackR, Math.hypot(p.x - trackCX, p.z - trackCZ));
+
+  // The jump ramp goes on the straightest stretch (not too close to the start line)
+  {
+    let best = Infinity;
+    for (let i = Math.floor(N * 0.25); i < Math.floor(N * 0.9); i += 2) {
+      const turn = turnAhead(i, 70);
+      if (turn < best) { best = turn; rampStart = i + 12; }
+    }
+  }
+  PADS = [
+    { i: Math.floor(N * 0.12), lane: 0 },
+    { i: Math.floor(N * 0.42), lane: 3 },
+    { i: Math.floor(N * 0.66), lane: -3 },
+    { i: wrap(rampStart - 30), lane: 0 },
+  ];
+
+  // Sky, fog and sunlight
+  {
+    const [top, mid, low] = tr.sky;
+    const tex = canvasTex(tr.stars ? 256 : 4, 256, (g, w, h) => {
+      const grd = g.createLinearGradient(0, 0, 0, h);
+      grd.addColorStop(0, top); grd.addColorStop(0.5, mid); grd.addColorStop(1, low);
+      g.fillStyle = grd; g.fillRect(0, 0, w, h);
+      if (tr.stars) for (let k = 0; k < 160; k++) { g.fillStyle = `rgba(255,255,255,${0.4 + Math.random() * 0.6})`; g.fillRect(Math.random() * w, Math.random() * h * 0.45, 1, 1); }
+    }, false);
+    trackGroup.add(new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })));
+    scene.fog.color.setHex(tr.fog[0]); scene.fog.near = tr.fog[1]; scene.fog.far = tr.fog[2];
+    hemi.color.setHex(tr.hemi[0]); hemi.groundColor.setHex(tr.hemi[1]); hemi.intensity = tr.hemi[2];
+    sun.color.setHex(tr.sun[0]); sun.intensity = tr.sun[1];
+  }
+  // Ground (grass, sand, snow...)
+  const gTex = groundTex(tr.ground);
+  gTex.wrapS = gTex.wrapT = THREE.RepeatWrapping;
+  const groundMat = new THREE.MeshLambertMaterial({ map: gTex });
+  {
+    let ground;
+    if (tr.groundDisc) {
+      // An island: a round beach with the sea all around it
+      const r = trackR + 70;
+      const tex2 = gTex.clone(); tex2.repeat.set(r * 2 / 7.5, r * 2 / 7.5);
+      ground = new THREE.Mesh(new THREE.CircleGeometry(r, 48), new THREE.MeshLambertMaterial({ map: tex2 }));
+      const sea = new THREE.Mesh(new THREE.PlaneGeometry(2400, 2400), lambert(0x2a8ac8));
+      sea.rotation.x = -Math.PI / 2; sea.position.set(trackCX, -0.4, trackCZ);
+      trackGroup.add(sea);
+    } else {
+      const tex2 = gTex.clone(); tex2.repeat.set(120, 120);
+      ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshLambertMaterial({ map: tex2 }));
+    }
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(trackCX, 0, trackCZ);
+    trackGroup.add(ground);
+  }
+  // On hilly tracks, the ground next to the road rises with it, then slopes back down to the flat ground
+  if (maxHill > 0) {
+    for (const side of [-1, 1]) {
+      const pos = [], uv = [], idx = [];
+      for (let k = 0; k <= N; k++) {
+        const i = k % N, h = PH[i];
+        const lats = [ROAD_WIDTH / 2, WALL + 3, WALL + 4 + h * 2.5], ys = [h - 0.01, h - 0.01, -0.05];
+        for (let c = 0; c < 3; c++) {
+          const v = P[i].clone().addScaledVector(NL[i], side * lats[c]);
+          pos.push(v.x, ys[c], v.z); uv.push(v.x / 7.5, v.z / 7.5);
+        }
+        if (k < N) { const a = k * 3; idx.push(a, a + 1, a + 3, a + 1, a + 4, a + 3, a + 1, a + 2, a + 4, a + 2, a + 5, a + 4); }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geo.computeVertexNormals();
+      trackGroup.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: gTex, side: THREE.DoubleSide })));
+    }
+  }
+  // Road (asphalt with a dashed middle line)
+  trackGroup.add(new THREE.Mesh(trackStrip(ROAD_WIDTH / 2, -ROAD_WIDTH / 2, 0.02, 12), roadMat));
+  // Curbs on both edges (they glow on the night track)
+  {
+    const [c1, c2] = tr.curb;
+    const curbTex = canvasTex(4, 16, (g) => { g.fillStyle = c1; g.fillRect(0, 0, 4, 8); g.fillStyle = c2; g.fillRect(0, 8, 4, 8); });
+    curbTex.wrapS = curbTex.wrapT = THREE.RepeatWrapping;
+    const curbMat = tr.glowCurb ? new THREE.MeshBasicMaterial({ map: curbTex }) : new THREE.MeshLambertMaterial({ map: curbTex });
+    trackGroup.add(new THREE.Mesh(trackStrip(ROAD_WIDTH / 2 + 1.4, ROAD_WIDTH / 2, 0.03, 3), curbMat));
+    trackGroup.add(new THREE.Mesh(trackStrip(-ROAD_WIDTH / 2, -ROAD_WIDTH / 2 - 1.4, 0.03, 3), curbMat));
+  }
+  // Tire walls along both sides
+  {
+    const items = [];
+    for (let i = 0; i < N; i += 3) for (const side of [-1, 1]) {
+      const base = P[i].clone().addScaledVector(NL[i], side * (WALL + 0.4));
+      // On the inside of tight corners the wall line folds back over the road: leave those tires out
+      if (!clearOfRoad(base.x, base.z, ROAD_WIDTH / 2 + 2.6)) continue;
+      for (let layer = 0; layer < 2; layer++) items.push([base.x, PH[i] + 0.2 + layer * 0.38, base.z, (i / 3 + layer) % 4 === 0]);
+    }
+    inst(tireGeo, tireMat, items, (m, [x, y, z]) => place(m, x, y, z, 1, 1, 1, 0, Math.PI / 2), ([, , , red]) => red ? tr.tire : 0x262626);
+  }
+  // The jump ramp: yellow and black stripes
+  {
+    const top = trackStrip(ROAD_WIDTH / 2, -ROAD_WIDTH / 2, 0.04, 3, rampStart, RAMP_LEN, (k) => RAMP_H * k / RAMP_LEN);
+    trackGroup.add(new THREE.Mesh(top, rampMat));
+    // Front face where you fly off, and the two sides
+    const end = wrap(rampStart + RAMP_LEN);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_WIDTH, RAMP_H), rampDark);
+    face.position.copy(P[end]).setY(PH[end] + RAMP_H / 2);
+    face.rotation.y = yawOf(T[end]);
+    trackGroup.add(face);
+    for (const side of [-1, 1]) {
+      const pos = [];
+      for (let k = 0; k < RAMP_LEN; k++) {
+        const ia = wrap(rampStart + k), ib = wrap(rampStart + k + 1);
+        const a = P[ia].clone().addScaledVector(NL[ia], side * ROAD_WIDTH / 2);
+        const b = P[ib].clone().addScaledVector(NL[ib], side * ROAD_WIDTH / 2);
+        const ga = PH[ia], gb = PH[ib], ha = ga + RAMP_H * k / RAMP_LEN, hb = gb + RAMP_H * (k + 1) / RAMP_LEN;
+        pos.push(a.x, ga, a.z, b.x, gb, b.z, b.x, hb, b.z, a.x, ga, a.z, b.x, hb, b.z, a.x, ha, a.z);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.computeVertexNormals();
+      trackGroup.add(new THREE.Mesh(geo, rampDark));
+    }
+  }
+  // Boost pads (they follow the hills)
+  for (const pad of PADS) trackGroup.add(new THREE.Mesh(trackStrip(pad.lane + 2, pad.lane - 2, 0.05, PAD_LEN * SEG, pad.i, PAD_LEN), padMat));
+  // Start / finish line, with a big arch over it
+  {
+    const line = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_WIDTH, 2.2), checkerMat);
+    line.rotation.order = 'YXZ';
+    line.rotation.set(-Math.PI / 2, yawOf(T[0]), 0);
+    line.position.copy(P[0]).setY(PH[0] + 0.04);
+    trackGroup.add(line);
+    const arch = new THREE.Group();
+    arch.position.copy(P[0]).setY(PH[0]);
+    arch.rotation.y = yawOf(T[0]);
+    for (const x of [-ROAD_WIDTH / 2 - 1.5, ROAD_WIDTH / 2 + 1.5]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.8, 8, 0.8), postMat); post.position.set(x, 4, 0); arch.add(post);
+    }
+    const sign = (text, color) => new THREE.MeshBasicMaterial({ map: canvasTex(512, 64, (g, w, h) => {
+      g.fillStyle = tr.banner; g.fillRect(0, 0, w, h);
+      g.fillStyle = color; g.font = (text.length > 13 ? '22px' : '28px') + ' "Press Start 2P", monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(text, w / 2, h / 2 + 2);
+    }, false) });
+    const banner = new THREE.Mesh(new THREE.BoxGeometry(ROAD_WIDTH + 3.8, 1.8, 0.5), [postMat, postMat, postMat, postMat,
+      sign(tr.name, '#ffd23d'), sign('FINISH', '#ffffff')]);
+    banner.position.y = 7.5;
+    arch.add(banner);
+    trackGroup.add(arch);
+    // Grandstand full of fans next to the start (on whichever side has room)
+    const stand = new THREE.Group();
+    for (let row = 0; row < 4; row++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(40, 1.2, 2.2), [postMat, postMat, postMat, postMat, crowdMat, postMat]);
+      step.position.set(0, 0.6 + row * 1.2, -row * 2.2);
+      stand.add(step);
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(42, 0.4, 10), lambert(tr.roof));
+    roof.position.set(0, 8, -3.5); stand.add(roof);
+    const s = 12;
+    for (const side of [-1, 1]) {
+      const c = P[s].clone().addScaledVector(NL[s], side * (WALL + 6));
+      let ok = true;
+      for (let u = -21; u <= 21 && ok; u += 3) for (const w of [-1.5, 4, 9]) {
+        const q = c.clone().addScaledVector(T[s], u).addScaledVector(NL[s], side * w);
+        if (!clearOfRoad(q.x, q.z, ROAD_WIDTH / 2 + 3)) { ok = false; break; }
+      }
+      if (!ok) continue;
+      stand.position.copy(c).setY(PH[s]);
+      stand.rotation.y = yawOf(T[s]) + side * Math.PI / 2;
+      trackGroup.add(stand);
+      break;
+    }
+  }
+  // Trees, rocks, buildings... (each track has its own)
+  tr.scenery(tr);
+}
+
+// Track 1: trees, kept well away from the road
+function sceneryPark() {
+  const spots = scatter(170, WALL + 6);
+  inst(trunkGeo, lambert(0x6b4a2a), spots, (m, [x, z, sc]) => m.makeScale(sc, sc, sc).setPosition(x, 1.2 * sc, z));
+  inst(leafGeo, lambert(0x2f7a2a), spots, (m, [x, z, sc]) => m.makeScale(sc, sc, sc).setPosition(x, 5 * sc, z));
+}
+// Track 2: tall red rock mesas, cactuses and boulders
+function sceneryDesert() {
+  const mesas = scatter(30, WALL + 5, { margin: 170, minSc: 10, maxSc: 26, rad: 1.05, tries: 3000 });
+  inst(CYL, lambert(0xffffff), mesas, (m, [x, z, sc, ry, r]) => { const h = sc * (0.9 + r * 0.9); place(m, x, h / 2, z, sc, h, sc, ry); },
+    (it, n) => [0xc0603a, 0xa84a2a, 0xd07a4a][n % 3]);
+  const cacti = scatter(110, WALL + 4, { minSc: 0.8, maxSc: 1.5 });
+  const cactusMat = lambert(0x3a8a3a);
+  inst(CYL, cactusMat, cacti, (m, [x, z, sc, ry]) => place(m, x, 2 * sc, z, 0.45 * sc, 4 * sc, 0.45 * sc, ry));
+  // Two arms each: an upright bit and a sideways bit joining it to the trunk
+  const arms = [];
+  for (const [x, z, sc, ry] of cacti) for (const [d, h] of [[1, 2.2], [-1, 2.9]]) arms.push([x + Math.cos(ry) * d * 0.85 * sc, z - Math.sin(ry) * d * 0.85 * sc, sc, ry, h, d, x, z]);
+  inst(CYL, cactusMat, arms, (m, [x, z, sc, ry, h]) => place(m, x, (h + 0.7) * sc, z, 0.3 * sc, 1.5 * sc, 0.3 * sc, ry));
+  inst(CYL, cactusMat, arms, (m, [x, z, sc, ry, h, d, cx, cz]) => place(m, (x + cx) / 2, h * sc, (z + cz) / 2, 0.28 * sc, 0.9 * sc, 0.28 * sc, ry, 0, Math.PI / 2));
+  const rocks = scatter(60, WALL + 3, { minSc: 0.6, maxSc: 2.2 });
+  inst(ROCK, lambert(0xb07850), rocks, (m, [x, z, sc, ry]) => place(m, x, sc * 0.3, z, sc * 1.3, sc * 0.8, sc, ry));
+}
+// Track 3: snowy pine trees and big white mountains all around
+function scenerySnow() {
+  const pines = scatter(200, WALL + 6, { minSc: 0.8, maxSc: 1.6 });
+  inst(trunkGeo, lambert(0x5a3a22), pines, (m, [x, z, sc]) => m.makeScale(sc, sc, sc).setPosition(x, 1.2 * sc, z));
+  inst(leafGeo, lambert(0x1f5a3a), pines, (m, [x, z, sc]) => m.makeScale(sc, sc, sc).setPosition(x, 5 * sc, z));
+  inst(CONE, lambert(0xffffff), pines, (m, [x, z, sc]) => place(m, x, 6.9 * sc, z, 1.05 * sc, 1.9 * sc, 1.05 * sc));   // snow on top
+  const peaks = scatter(18, WALL + 10, { margin: 260, minSc: 45, maxSc: 85, rad: 1, tries: 3000 });
+  inst(CONE, lambert(0x8a98b0), peaks, (m, [x, z, sc, ry, r]) => { const h = sc * (1.1 + r * 0.6); place(m, x, h / 2, z, sc, h, sc, ry); });
+  inst(CONE, lambert(0xffffff), peaks, (m, [x, z, sc, ry, r]) => { const h = sc * (1.1 + r * 0.6); place(m, x, h - h * 0.19, z, sc * 0.4, h * 0.38, sc * 0.4, ry); });
+  const rocks = scatter(40, WALL + 3, { minSc: 0.6, maxSc: 1.8 });
+  inst(ROCK, lambert(0x6a7080), rocks, (m, [x, z, sc, ry]) => place(m, x, sc * 0.3, z, sc * 1.2, sc * 0.8, sc, ry));
+}
+// Track 4: tall buildings with lit-up windows, glowing signs and street lamps
+function sceneryCity() {
+  const winTex = canvasTex(32, 64, (g) => {
+    g.fillStyle = '#14141e'; g.fillRect(0, 0, 32, 64);
+    for (let y = 2; y < 62; y += 4) for (let x = 2; x < 30; x += 4) {
+      const v = Math.random();
+      g.fillStyle = v < 0.45 ? '#ffd88a' : v < 0.6 ? '#8ad8ff' : '#22222e'; g.fillRect(x, y, 2, 2);
+    }
+  });
+  const towers = scatter(140, WALL + 4, { margin: 80, minSc: 5, maxSc: 12, rad: 1.45, tries: 5000 });
+  const heightOf = (sc, r) => 14 + r * 55 + sc * 1.5;
+  inst(BOX, new THREE.MeshLambertMaterial({ map: winTex, emissiveMap: winTex, emissive: 0xffffff, emissiveIntensity: 0.9 }), towers,
+    (m, [x, z, sc, ry, r]) => { const h = heightOf(sc, r); place(m, x, h / 2, z, sc * 2, h, sc * 2, ry); },
+    (it, n) => [0x8a8aa8, 0x6a7a9a, 0xa88a9a, 0x7a9a8a][n % 4]);
+  // A glowing sign on top of every other building
+  const signs = towers.filter((t, n) => n % 2 === 0);
+  inst(BOX, new THREE.MeshBasicMaterial({ color: 0xffffff }), signs,
+    (m, [x, z, sc, ry, r]) => place(m, x, heightOf(sc, r) + 1.2, z, sc * 1.6, 2, 0.4, ry),
+    (it, n) => [0xff3dd2, 0x3df0ff, 0xffd23d, 0x3dff6b][n % 4]);
+  // Street lamps just outside the tire walls
+  const lamps = [];
+  for (let i = 0; i < N; i += 22) for (const side of [-1, 1]) {
+    const v = P[i].clone().addScaledVector(NL[i], side * (WALL + 1.6));
+    if (clearOfRoad(v.x, v.z, ROAD_WIDTH / 2 + 3)) lamps.push([v.x, v.z, PH[i]]);
+  }
+  inst(CYL, lambert(0x3a3a48), lamps, (m, [x, z, h]) => place(m, x, h + 3, z, 0.14, 6, 0.14));
+  inst(BALL, new THREE.MeshBasicMaterial({ color: 0xfff0a0 }), lamps, (m, [x, z, h]) => place(m, x, h + 6.2, z, 0.5, 0.5, 0.5));
+}
+// Track 5: a beach with palm trees, black lava rocks and a smoking volcano out in the sea
+function sceneryVolcano() {
+  const onBeach = (x, z) => Math.hypot(x - trackCX, z - trackCZ) < trackR + 60;
+  const palms = scatter(90, WALL + 5, { minSc: 0.8, maxSc: 1.3, inside: onBeach });
+  const tilt = (ry, r) => [Math.cos(ry) * 0.25 * r, Math.sin(ry) * 0.25 * r];
+  const palmTop = (x, z, sc, ry, r) => { const [tx, tz] = tilt(ry, r); _v.set(0, 7 * sc, 0).applyEuler(_e.set(tx, 0, tz)); return [x + _v.x, _v.y, z + _v.z]; };
+  inst(CYL, lambert(0x8a6a4a), palms, (m, [x, z, sc, ry, r]) => {
+    const [tx, tz] = tilt(ry, r); const [px, py, pz] = palmTop(x, z, sc, ry, r);
+    place(m, (x + px) / 2, py / 2, (z + pz) / 2, 0.3 * sc, 7 * sc, 0.3 * sc, 0, tx, tz);
+  });
+  inst(CONE, lambert(0x2a8a3a), palms, (m, [x, z, sc, ry, r]) => { const [px, py, pz] = palmTop(x, z, sc, ry, r); place(m, px, py + 0.2, pz, 3.4 * sc, 1.3 * sc, 3.4 * sc, ry); });
+  const rocks = scatter(55, WALL + 3, { minSc: 0.6, maxSc: 2.0, inside: onBeach });
+  inst(ROCK, lambert(0x2a2428), rocks, (m, [x, z, sc, ry]) => place(m, x, sc * 0.3, z, sc * 1.2, sc * 0.8, sc, ry));
+  // The volcano, out in the sea past the far side of the island
+  const vx = trackCX, vz = trackCZ + trackR + 150, vr = 105, vh = 95;
+  const volcano = new THREE.Mesh(CONE, lambert(0x4a3a3a));
+  volcano.scale.set(vr, vh, vr); volcano.position.set(vx, vh / 2 - 2, vz);
+  trackGroup.add(volcano);
+  const lava = new THREE.Mesh(CONE, new THREE.MeshBasicMaterial({ color: 0xff5a1a }));
+  lava.scale.set(vr * 0.2, vh * 0.19, vr * 0.2); lava.position.set(vx, vh - 2 - vh * 0.09, vz);
+  trackGroup.add(lava);
+  const puffs = [];
+  for (let k = 0; k < 7; k++) puffs.push([vx + (Math.random() - 0.5) * 14, vh + 6 + k * 9, vz + (Math.random() - 0.5) * 14, 7 + k * 2.2]);
+  inst(BALL, lambert(0x6a6068, { transparent: true, opacity: 0.75 }), puffs, (m, [x, y, z, s]) => place(m, x, y, z, s, s * 0.8, s));
+}
+
+// ---------- Saved progress ----------
+// unlocked: the highest track you can pick. best: your best race time on each track (in seconds).
+// Finish a race in the top 3 to unlock the next track.
+const progress = { unlocked: 1, best: {} };
+try {
+  const saved = JSON.parse(localStorage.getItem('kartProgress') || 'null');
+  if (saved && typeof saved === 'object') {
+    progress.unlocked = THREE.MathUtils.clamp(saved.unlocked | 0 || 1, 1, TRACK_COUNT);
+    for (let t = 1; t <= TRACK_COUNT; t++) { const b = parseFloat(saved.best?.[t]); if (b > 0) progress.best[t] = b; }
+  }
+  // Best time from before there were five tracks counts for track 1
+  const old = parseFloat(localStorage.getItem('kartBest'));
+  if (old > 0 && !(progress.best[1] <= old)) progress.best[1] = old;
+} catch (e) {}
+function saveProgress() { try { localStorage.setItem('kartProgress', JSON.stringify(progress)); } catch (e) {} }
+let pickTrack = progress.unlocked;   // the track picked on the menu (starts on the newest one you've unlocked)
+buildTrack(pickTrack);
 
 // ---------- Karts ----------
 function makeKart(color, withDriver) {
@@ -522,7 +819,7 @@ racers.push(player);
 scene.add(player.mesh);
 const bots = [];
 BOT_SPEEDS.forEach((max, n) => {
-  const b = { name: BOT_NAMES[n], isBot: true, color: BOT_COLORS[n], mesh: makeKart(BOT_COLORS[n], true), max, speed: 0, lane: 0, laneTarget: 0, laneT: 0,
+  const b = { name: BOT_NAMES[n], isBot: true, color: BOT_COLORS[n], mesh: makeKart(BOT_COLORS[n], true), max, base: max, speed: 0, lane: 0, laneTarget: 0, laneT: 0,
     y: 0, vy: 0, lastG: 0, s: 0, boost: 0, finished: false, finishTime: 0, yaw: 0, net: null };
   racers.push(b);
   bots.push(b);
@@ -593,10 +890,14 @@ function showBoard(lines, color = '#ffd23d') {
   if (!lines.length) { board.visible = false; boardTex.needsUpdate = true; return; }
   g.fillStyle = 'rgba(10,20,40,0.82)'; g.fillRect(0, 0, 1024, 512);
   g.textAlign = 'center'; g.textBaseline = 'middle';
+  const gap = Math.min(54, 270 / Math.max(1, lines.length - 2));   // squeeze lines together when there are lots
   lines.forEach((line, n) => {
     g.fillStyle = n === 0 ? color : '#ffffff';
-    g.font = (n === 0 ? '64px' : '28px') + ' "Press Start 2P", monospace';
-    g.fillText(line, 512, n === 0 ? 120 : 220 + (n - 1) * 54);
+    let size = n === 0 ? 64 : 28;
+    g.font = size + 'px "Press Start 2P", monospace';
+    const w = g.measureText(line).width;
+    if (w > 980) { size = Math.floor(size * 980 / w); g.font = size + 'px "Press Start 2P", monospace'; }   // long lines get smaller
+    g.fillText(line, 512, n === 0 ? 120 : 220 + (n - 1) * gap);
   });
   boardTex.needsUpdate = true;
   board.visible = renderer.xr.isPresenting;
@@ -605,8 +906,8 @@ function showBoard(lines, color = '#ffd23d') {
 // ---------- Race state ----------
 let state = 'intro';   // intro → countdown → racing → finished
 let stateT = 0, raceT = 0, paused = false, countLast = 4;
-let bestTime = Infinity;
-try { const b = parseFloat(localStorage.getItem('kartBest')); if (b > 0) bestTime = b; } catch (e) {}
+let bestTime = progress.best[TRACK] || Infinity;   // your best time on the track that's built right now
+let justUnlocked = 0;                              // the track your last race unlocked (0 = none)
 const ordinal = (n) => n + (['TH', 'ST', 'ND', 'RD'][n] || 'TH');
 const fmt = (t) => { if (!isFinite(t)) return '-:--.--'; const m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2); };
 
@@ -619,23 +920,26 @@ function placeOnGrid() {
   if (multi && fi < 0) racers.push(friend);
   if (!multi && fi >= 0) racers.splice(fi, 1);
   friend.mesh.visible = multi;
+  // Later tracks have faster bots
+  for (const b of bots) b.max = b.base * curTrack.botMul;
   order.forEach((r, slot) => {
     r.s = -6 - slot * 6;
     const lane = slot % 2 ? -3 : 3;
-    r.speed = 0; r.boost = 0; r.y = 0; r.vy = 0; r.lastG = 0; r.finished = false; r.finishTime = 0;
+    r.speed = 0; r.boost = 0; r.y = r.lastG = hillAt(r.s); r.vy = 0; r.finished = false; r.finishTime = 0;
     if (r.isPlayer) {
       trackAt(r.s, r.pos, lane);
       r.idx = wrap(Math.round(r.s)); r.yaw = yawOf(T[r.idx]); r.steer = 0; r.driftT = 0; r.drifting = false;
       r.lapStart = 0; r.bestLap = Infinity; r.lastLapShown = 0; r.wrongT = 0;
     } else if (r.isRemote) {
-      trackAt(r.s, r.target, lane); r.mesh.position.copy(r.target);
+      trackAt(r.s, r.target, lane); r.target.y = r.y; r.mesh.position.copy(r.target);
       r.yaw = r.targetYaw = yawOf(T[wrap(Math.round(r.s))]);
     } else { r.lane = lane; r.laneTarget = lane; r.laneT = 2 + Math.random() * 3; r.net = null; }
   });
 }
 function beginRace() {
   placeOnGrid();
-  state = 'countdown'; stateT = 0; raceT = 0; countLast = 4;
+  state = 'countdown'; stateT = 0; raceT = 0; countLast = 4; justUnlocked = 0;
+  $('trackName').textContent = `TRACK ${TRACK}: ${curTrack.name}`;
   $('intro').hidden = true; $('finishMenu').hidden = true;
   for (const id of ['hud', 'speed', 'map']) $(id).hidden = renderer.xr.isPresenting;
   $('pauseBtn').hidden = false;
@@ -644,11 +948,35 @@ function beginRace() {
   document.activeElement?.blur();
   showBoard([]);
 }
-// Race again: in a friend race only the host can start it (both headsets start together)
+// Build a track (if it isn't already built) and line everyone up on it
+function setTrack(n) {
+  n = THREE.MathUtils.clamp(n | 0 || 1, 1, TRACK_COUNT);
+  if (n !== TRACK) buildTrack(n);
+  bestTime = progress.best[TRACK] || Infinity;
+  $('trackName').textContent = `TRACK ${TRACK}: ${curTrack.name}`;
+  placeOnGrid();
+}
+const nextAvailable = () => TRACK < TRACK_COUNT && progress.unlocked > TRACK;
+// Race again: in a friend race only the host can start it (both headsets start together).
+// The host's track goes along with the start message, so the friend's game builds the same track.
 function startRace() {
   if (isGuest()) return;
-  if (multi && mp.connected) mp.startForBoth({});
-  else { multi = false; beginRace(); }
+  if (multi && mp.connected) mp.startForBoth({ track: TRACK });
+  else { multi = false; setTrack(TRACK); beginRace(); }
+}
+// Next track (once you've unlocked it)
+function nextTrack() {
+  if (isGuest() || !nextAvailable()) return;
+  pickTrack = TRACK + 1;
+  if (multi && mp.connected) mp.startForBoth({ track: pickTrack });
+  else { multi = false; setTrack(pickTrack); beginRace(); }
+}
+// The host said "go" (on the host's own game too): build the host's track, then count down.
+// An older game that doesn't send a track means track 1.
+function startFromHost(data) {
+  multi = true;
+  setTrack((data && data.track) || 1);
+  beginRace();
 }
 // Back to the menu (play solo / host / join)
 function openMenu() {
@@ -658,13 +986,17 @@ function openMenu() {
   $('pauseBtn').hidden = true;
   showBoard([]);
   multi = false;
-  placeOnGrid();
+  // Back on the track you picked (a friend's race might have been on a track you haven't unlocked yet)
+  pickTrack = TRACK <= progress.unlocked ? TRACK : Math.min(pickTrack, progress.unlocked);
+  setTrack(pickTrack);
+  drawPicker();
   mp.open();
 }
 const mp = createMultiplayer({
   THREE, renderer, gameId: 'kart', title: 'KART RACE', color: '#3d8bff', soloLabel: 'RACE THE BOTS',
-  onSolo: () => { multi = false; beginRace(); },
-  onStart: () => { multi = true; beginRace(); },
+  onSolo: () => { multi = false; setTrack(pickTrack); beginRace(); },
+  onHostStart: () => mp.startForBoth({ track: pickTrack }),   // tell your friend which track
+  onStart: (data) => startFromHost(data),
   onMessage: (msg) => onNet(msg),
   onLeft: () => {
     // Keep racing the bots if your friend leaves
@@ -680,8 +1012,90 @@ mp.panel.position.set(0, 1.5, -1.3);
 player.mesh.add(mp.panel);
 $('playBtn').addEventListener('click', () => { $('intro').hidden = true; mp.open(); });
 $('againBtn').addEventListener('click', startRace);
+$('nextBtn').addEventListener('click', nextTrack);
 $('menuBtn').addEventListener('click', openMenu);
-placeOnGrid();
+
+// ---------- Track picker (on the start screen, under the PC menu, and a board in VR) ----------
+const canPick = () => state === 'intro' && mp.role !== 'guest';
+function pick(n) {
+  if (!canPick() || n < 1 || n > progress.unlocked) return;
+  pickTrack = n;
+  setTrack(n);
+  drawPicker();
+}
+function pickerHTML() {
+  return TRACKS.map((tr, k) => {
+    const n = k + 1, locked = n > progress.unlocked, best = progress.best[n];
+    return `<button class="mc${n === pickTrack ? ' sel' : ''}" type="button" data-t="${n}" ${locked ? 'disabled' : ''} title="${tr.name}">`
+      + `${locked ? '🔒' : n}<small>${locked ? 'LOCKED' : best ? fmt(best) : 'NEW'}</small></button>`;
+  }).join('');
+}
+function drawPicker() {
+  const tr = TRACKS[pickTrack - 1];
+  const info = `TRACK ${pickTrack}: ${tr.name}<br><span style="color:var(--muted)">${tr.place} · BEST ${fmt(progress.best[pickTrack] || Infinity)}</span>`;
+  for (const [i, p] of [['trackInfo', 'trackPick'], ['trackBarInfo', 'trackBarPick']]) { $(i).innerHTML = info; $(p).innerHTML = pickerHTML(); }
+  drawTrackBoard();
+}
+for (const id of ['trackPick', 'trackBarPick']) $(id).addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-t]');
+  if (b) { pick(+b.dataset.t); b.blur(); }
+});
+// VR: a board under the menu with the five tracks. Point and pull the trigger to pick one.
+const tbCanvas = document.createElement('canvas'); tbCanvas.width = 1024; tbCanvas.height = 272;
+const tbTex = new THREE.CanvasTexture(tbCanvas); tbTex.colorSpace = THREE.SRGBColorSpace;
+const trackBoard = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.425), new THREE.MeshBasicMaterial({ map: tbTex, transparent: true, depthTest: false, fog: false }));
+trackBoard.position.set(0, 0.74, -1.22); trackBoard.rotation.x = -0.35; trackBoard.renderOrder = 1002; trackBoard.visible = false;
+player.mesh.add(trackBoard);
+function drawTrackBoard() {
+  const g = tbCanvas.getContext('2d');
+  g.clearRect(0, 0, 1024, 272);
+  g.fillStyle = 'rgba(10,12,30,0.94)'; g.fillRect(0, 0, 1024, 272);
+  g.strokeStyle = '#3d8bff'; g.lineWidth = 8; g.strokeRect(4, 4, 1016, 264);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#ffd23d'; g.font = '26px "Press Start 2P", monospace';
+  g.fillText(`TRACK ${pickTrack}: ${TRACKS[pickTrack - 1].name}`, 512, 42);
+  TRACKS.forEach((tr, k) => {
+    const n = k + 1, x = 32 + k * 196, locked = n > progress.unlocked, best = progress.best[n];
+    g.fillStyle = locked ? '#2a2a3a' : n === pickTrack ? '#3d8bff' : '#3a3f6a';
+    g.fillRect(x, 80, 180, 166);
+    g.strokeStyle = '#000'; g.lineWidth = 4; g.strokeRect(x, 80, 180, 166);
+    g.fillStyle = locked ? '#777' : '#fff';
+    g.font = '52px "Press Start 2P", monospace'; g.fillText(locked ? '🔒' : String(n), x + 90, 140);
+    g.font = '16px "Press Start 2P", monospace'; g.fillText(locked ? 'LOCKED' : best ? fmt(best) : 'NEW', x + 90, 212);
+  });
+  tbTex.needsUpdate = true;
+}
+const tbRay = new THREE.Raycaster(), tbRot = new THREE.Matrix4();
+function trackBoardSelect(c) {   // returns true if the trigger press picked a track
+  if (!trackBoard.visible) return false;
+  tbRot.identity().extractRotation(c.matrixWorld);
+  tbRay.ray.origin.setFromMatrixPosition(c.matrixWorld);
+  tbRay.ray.direction.set(0, 0, -1).applyMatrix4(tbRot);
+  const hit = tbRay.intersectObject(trackBoard, false)[0];
+  if (!hit || !hit.uv) return false;
+  const px = hit.uv.x * 1024, py = (1 - hit.uv.y) * 272;
+  const k = Math.floor((px - 32) / 196);
+  if (py >= 80 && py <= 246 && k >= 0 && k < TRACK_COUNT && px - 32 - k * 196 <= 180) { pick(k + 1); tone(880, 0.05, 'square', 0.05); }
+  return true;
+}
+// Secret code: 7656 unlocks every track (OK button or Enter)
+$('codeForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = $('codeInput'), msg = $('codeMsg');
+  const ok = input.value.trim() === '7656';
+  if (ok) {
+    progress.unlocked = TRACK_COUNT;
+    saveProgress();
+    drawPicker();
+    tone(660, 0.12, 'square', 0.06); tone(990, 0.2, 'square', 0.06, 990, 0.12);
+  } else tone(200, 0.25, 'square', 0.06, 140);
+  msg.textContent = ok ? 'CODE ACCEPTED! ALL TRACKS UNLOCKED.' : 'WRONG CODE.';
+  msg.classList.toggle('bad', !ok);
+  msg.hidden = false;
+  input.value = '';
+});
+setTrack(pickTrack);
+drawPicker();
 
 // ---------- Multiplayer messages ----------
 let netT = 0, botNetT = 0;
@@ -718,7 +1132,7 @@ function followBot(b, dt) {
   const oldLane = b.lane;
   b.lane += (lane - b.lane) * Math.min(1, dt * 8);
   b.speed = speed; b.boost = boost; b.y += (y - b.y) * Math.min(1, dt * 10);
-  b.airborne = b.y > 0.1;
+  b.airborne = b.y > hillAt(b.s) + 0.1;
   b.finished = !!fin; b.finishTime = ft;
   placeBot(b, oldLane, dt);
 }
@@ -727,7 +1141,12 @@ function finishRace() {
   player.finished = true; player.finishTime = raceT;
   state = 'finished'; stateT = 0;
   const place = 1 + racers.filter(r => !r.isPlayer && r.finished).length;
-  if (raceT < bestTime) { bestTime = raceT; try { localStorage.setItem('kartBest', String(bestTime)); } catch (e) {} }
+  if (raceT < bestTime) { bestTime = raceT; progress.best[TRACK] = Math.round(raceT * 100) / 100; }
+  // Top 3 unlocks the next track
+  justUnlocked = 0;
+  if (place <= 3 && TRACK < TRACK_COUNT && progress.unlocked <= TRACK) { progress.unlocked = TRACK + 1; justUnlocked = TRACK + 1; }
+  saveProgress();
+  drawPicker();
   $('finishTitle').textContent = place === 1 ? 'YOU WIN!' : 'YOU FINISHED ' + ordinal(place) + '!';
   if (place === 1) { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.25, 'square', 0.08, f, i * 0.12)); }
   else tone(392, 0.4, 'square', 0.08, 330);
@@ -746,15 +1165,24 @@ function standings() {
 }
 function updateResults() {
   const list = standings();
-  $('results').innerHTML = list.map((r, n) =>
-    `<div class="${r.isPlayer ? 'you' : ''}">${ordinal(n + 1)} ${r.name} ${r.finished ? fmt(r.finishTime) : '...'}</div>`).join('')
-    + `<div>BEST TIME: ${fmt(bestTime)}</div>`;
+  const next = TRACKS[TRACK];   // the track after this one (none after the last)
+  const unlockLine = justUnlocked ? `UNLOCKED TRACK ${justUnlocked}: ${TRACKS[justUnlocked - 1].name}!`
+    : next && progress.unlocked <= TRACK ? `FINISH TOP 3 TO UNLOCK TRACK ${TRACK + 1}` : '';
+  $('results').innerHTML = `<div>TRACK ${TRACK}: ${curTrack.name}</div>`
+    + list.map((r, n) => `<div class="${r.isPlayer ? 'you' : ''}">${ordinal(n + 1)} ${r.name} ${r.finished ? fmt(r.finishTime) : '...'}</div>`).join('')
+    + `<div>BEST TIME: ${fmt(bestTime)}</div>`
+    + (unlockLine ? `<div class="you">${unlockLine}</div>` : '');
   const place = list.indexOf(player) + 1;
+  const canNext = !isGuest() && nextAvailable();
   showBoard([place === 1 ? 'YOU WIN!' : ordinal(place) + ' PLACE',
     ...list.map((r, n) => `${ordinal(n + 1)} ${r.name} ${r.finished ? fmt(r.finishTime) : '...'}`),
-    (isGuest() ? 'WAITING FOR HOST' : 'TRIGGER: AGAIN') + '  GRIP: MENU  Y: ARCADE'], place === 1 ? '#ffd23d' : '#ffffff');
+    ...(unlockLine ? [unlockLine] : []),
+    isGuest() ? 'WAITING FOR HOST  GRIP: MENU  Y: ARCADE'
+      : canNext ? 'TRIGGER: NEXT TRACK  B: AGAIN  GRIP: MENU  Y: ARCADE'
+      : 'TRIGGER: AGAIN  GRIP: MENU  Y: ARCADE'], place === 1 ? '#ffd23d' : '#ffffff');
   // In a friend race only the host can start the next one
   $('againBtn').hidden = isGuest();
+  $('nextBtn').hidden = !canNext;
 }
 
 // ---------- Pause ----------
@@ -794,13 +1222,17 @@ $('endArcadeBtn').addEventListener('click', goToArcade);
 
 // ---------- PC controls ----------
 const keys = {};
+// Typing in a text box (the secret code, or a join code) is not driving
+const typing = (e) => { const t = e.target; return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable); };
 addEventListener('keydown', e => {
+  if (typing(e)) return;
   keys[e.code] = true;
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   if ((e.code === 'KeyP' || e.code === 'Escape') && !e.repeat && state !== 'intro') setPaused(!paused);
   if (e.code === 'KeyR' && !e.repeat && state === 'racing' && !paused) resetToTrack();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('focusin', e => { if (typing(e)) for (const k in keys) keys[k] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
 // ---------- VR controls ----------
@@ -811,7 +1243,9 @@ for (let i = 0; i < 2; i++) {
   c.addEventListener('disconnected', () => { c.userData.input = null; });
   c.addEventListener('selectstart', () => {
     if (mp.select(c)) return;   // pointing at the menu
-    if (state === 'finished' && stateT > 1.5) startRace();
+    if (trackBoardSelect(c)) return;   // pointing at the track picker
+    // Results: trigger goes to the next track if you've unlocked it, otherwise races again
+    if (state === 'finished' && stateT > 1.5) { if (!isGuest() && nextAvailable()) nextTrack(); else startRace(); }
   });
   seat.add(c);
   controllers.push(c);
@@ -864,6 +1298,7 @@ function readVR() {
       c.userData.aWas = a;
       const bb = !!b[5]?.pressed;
       if (bb && !c.userData.bWas && state === 'racing' && !paused) resetToTrack();
+      if (bb && !c.userData.bWas && state === 'finished' && stateT > 1.5) startRace();   // results: B races this track again
       c.userData.bWas = bb;
     }
     if (b[1]?.pressed) {
@@ -877,7 +1312,7 @@ function readVR() {
 // ---------- Driving ----------
 function resetToTrack() {
   const i = player.idx;
-  player.pos.copy(P[i]); player.y = 0; player.vy = 0;
+  player.pos.copy(P[i]); player.y = player.lastG = PH[i]; player.vy = 0;
   player.yaw = yawOf(T[i]); player.speed = 0; player.boost = 0;
   tone(500, 0.15, 'square', 0.06, 300);
 }
@@ -1003,7 +1438,7 @@ function placeBot(b, oldLane, dt) {
   b.mesh.position.set(tmp.x, b.y, tmp.z);
   const t = T[wrap(Math.floor(b.s))];
   b.yaw = yawOf(t) - Math.atan2(b.lane - oldLane, Math.max(0.01, b.speed * dt)) * 0.6;
-  b.mesh.rotation.set(b.airborne ? -0.12 : 0, b.yaw, 0);
+  b.mesh.rotation.set(b.airborne ? -0.12 : Math.atan(slopeAt(b.s)), b.yaw, 0);
   b.steerLook = THREE.MathUtils.clamp((b.lane - oldLane) / Math.max(dt, 1e-3) * -0.3, -1, 1);
 }
 
@@ -1036,10 +1471,7 @@ function animateKart(r, steer, dt) {
 }
 
 // ---------- HUD ----------
-const mapCtx = $('map').getContext('2d');
-let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-for (const p of P) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
-const mapScale = 130 / Math.max(maxX - minX, maxZ - minZ);
+const mapCtx = $('map').getContext('2d');   // (the map's size comes from buildTrack)
 const mapXY = (x, z) => [10 + (x - minX) * mapScale, 10 + (z - minZ) * mapScale];
 function drawMap() {
   const g = mapCtx;
@@ -1064,7 +1496,8 @@ function updateHud(dt) {
   const kmh = Math.round(Math.abs(player.speed) * 3.6);
   $('pos').textContent = ordinal(place) + ' / ' + racers.length;
   $('lap').textContent = `LAP ${lap}/${LAPS}`;
-  $('time').textContent = fmt(raceT);
+  const shownT = player.finished ? player.finishTime : raceT;
+  $('time').textContent = fmt(shownT);
   $('best').textContent = isFinite(bestTime) ? 'BEST ' + fmt(bestTime) : '';
   $('speed').firstChild.textContent = kmh + ' KM/H';
   if (!$('map').hidden) drawMap();
@@ -1074,31 +1507,38 @@ function updateHud(dt) {
     g.fillStyle = 'rgba(10,20,40,0.85)'; g.fillRect(0, 0, 512, 192);
     g.textBaseline = 'middle';
     g.fillStyle = '#ffd23d'; g.font = '44px "Press Start 2P", monospace'; g.textAlign = 'left'; g.fillText(ordinal(place), 18, 56);
-    g.fillStyle = '#fff'; g.font = '20px "Press Start 2P", monospace'; g.fillText(`LAP ${lap}/${LAPS}`, 18, 118); g.fillText(fmt(raceT), 18, 160);
+    g.fillStyle = '#fff'; g.font = '20px "Press Start 2P", monospace'; g.fillText(`LAP ${lap}/${LAPS}`, 18, 118); g.fillText(fmt(shownT), 18, 160);
     g.textAlign = 'right'; g.font = '40px "Press Start 2P", monospace'; g.fillText(String(kmh), 494, 70);
     g.font = '16px "Press Start 2P", monospace'; g.fillText('KM/H', 494, 116);
     if (player.boost > 0) { g.fillStyle = '#3df0ff'; g.fillText('BOOST!', 494, 160); }
     dashTex.needsUpdate = true;
   }
 }
-function bigText(text, warn = false) {
+function bigText(text, warn = false, name = false) {
   const el = $('big');
   if (!text) { el.hidden = true; return; }
-  el.hidden = renderer.xr.isPresenting; el.textContent = text; el.classList.toggle('warn', warn);
+  el.hidden = renderer.xr.isPresenting; el.textContent = text; el.classList.toggle('warn', warn); el.classList.toggle('name', name);
 }
 
 // ---------- Main loop ----------
 const clock = new THREE.Clock();
 const camTarget = new THREE.Vector3(), lookTarget = new THREE.Vector3();
 let lapMsgT = 0, lapMsg = '';
-renderer.setAnimationLoop(() => {
+let debugInput = null, debugNoRender = false;   // only used by the ?debug test hook
+function frame() {
   vrPauseButtons();
   const dt = Math.min(clock.getDelta(), 0.05);
   const inVR = renderer.xr.isPresenting;
   if (inVR && recenterFrames > 0 && --recenterFrames === 0) recenterSeat();
 
+  // The track picker shows on the menu (not for a friend who joined: the host picks)
+  const showPicker = canPick() && mp.isOpen() && mp.page !== 'join';
+  $('trackBar').hidden = !showPicker || inVR;
+  trackBoard.visible = showPicker && inVR;
+
   let input = { gas: 0, brake: 0, steer: 0, drift: false };
-  if (inVR) input = readVR();
+  if (debugInput) input = debugInput();
+  else if (inVR) input = readVR();
   else {
     input.gas = (keys.KeyW || keys.ArrowUp) ? 1 : 0;
     input.brake = (keys.KeyS || keys.ArrowDown) ? 1 : 0;
@@ -1111,12 +1551,12 @@ renderer.setAnimationLoop(() => {
     stateT += dt;
     if (state === 'countdown') {
       const n = Math.ceil(3 - stateT + 1);   // 3, 2, 1
-      if (stateT < 1) bigText('');
+      if (stateT < 1) { bigText(`TRACK ${TRACK}\n${curTrack.name}`, false, true); showBoard([`TRACK ${TRACK}`, curTrack.name, curTrack.place]); }
       if (stateT >= 1 && n !== countLast && n > 0) { countLast = n; tone(440, 0.25, 'square', 0.1); }
       if (stateT >= 1) { bigText(String(n)); showBoard([String(n)]); }
       if (stateT >= 4) { state = 'racing'; stateT = 0; tone(880, 0.6, 'square', 0.12); bigText('GO!'); showBoard(['GO!'], '#3dff6b'); lapMsgT = 1; lapMsg = 'GO!'; }
     } else {
-      raceT += state === 'racing' ? dt : 0;
+      raceT += dt;   // keeps running after you finish, so the bots behind you get their real times
     }
     updatePlayer(dt, state === 'countdown' ? { gas: 0, brake: 0, steer: input.steer, drift: false } : input);
     for (const b of bots) isGuest() ? followBot(b, dt) : updateBot(b, dt);
@@ -1166,7 +1606,9 @@ renderer.setAnimationLoop(() => {
 
   // Put your kart where it is
   player.mesh.position.set(player.pos.x, player.y, player.pos.z);
-  player.mesh.rotation.set(player.airborne ? -0.1 : 0, player.yaw + (player.drifting ? player.steer * 0.35 : 0), 0);
+  // (on PC the kart tips up and down with the hills; in VR it stays level so your view doesn't tilt)
+  const pitch = player.airborne ? -0.1 : inVR ? 0 : Math.atan(slopeAt(player.idx) * fwd.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw)).dot(T[player.idx]));
+  player.mesh.rotation.set(pitch, player.yaw + (player.drifting ? player.steer * 0.35 : 0), 0);
   animateKart(player, player.steer, paused ? 0 : dt);
   for (const b of bots) animateKart(b, b.steerLook || 0, paused ? 0 : dt);
   if (player.mesh.userData.driver) player.mesh.userData.driver.visible = !inVR;
@@ -1180,9 +1622,9 @@ renderer.setAnimationLoop(() => {
     fwd.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
     if (state === 'intro') {
       const t = clock.elapsedTime * 0.15;
-      camTarget.set(P[0].x + Math.sin(t) * 22, 9, P[0].z + Math.cos(t) * 22);
+      camTarget.set(P[0].x + Math.sin(t) * 22, PH[0] + 9, P[0].z + Math.cos(t) * 22);
       camera.position.lerp(camTarget, 0.05);
-      camera.lookAt(P[0].x, 1, P[0].z);
+      camera.lookAt(P[0].x, PH[0] + 1, P[0].z);
     } else {
       camTarget.copy(player.mesh.position).addScaledVector(fwd, -6.5).setY(player.y + 2.6);
       camera.position.lerp(camTarget, Math.min(1, dt * 6));
@@ -1193,8 +1635,38 @@ renderer.setAnimationLoop(() => {
     }
   }
   padTex.offset.y -= dt * 1.5;
-  renderer.render(scene, camera);
-});
+  if (!debugNoRender) renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(frame);
+
+// ---------- Test hook (only when the page address has ?debug in it) ----------
+if (location.search.includes('debug')) {
+  // Drives along the middle of the road: looks a bit ahead, steers at it, brakes for sharp corners
+  const aim = new THREE.Vector3();
+  const autopilot = (lane = 0) => () => {
+    const p = player, look = 10 + Math.abs(p.speed) * 0.5;
+    trackAt(p.s + look / SEG, aim, lane);
+    let dy = Math.atan2(-(aim.x - p.pos.x), -(aim.z - p.pos.z)) - p.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    const sharp = turnAhead(wrap(Math.floor(p.s)), 40);
+    const want = sharp > 1.3 ? 15 : sharp > 0.9 ? 19 : 40;
+    return { gas: p.speed < want ? 1 : 0, brake: p.speed > want + 3 ? 1 : 0, steer: THREE.MathUtils.clamp(dy * 3, -1, 1), drift: false };
+  };
+  window.kartDebug = {
+    TRACKS, progress, player, bots, racers, mp, renderer,
+    get state() { return state; }, get stateT() { return stateT; }, get track() { return TRACK; }, get pickTrack() { return pickTrack; },
+    get N() { return N; }, get P() { return P; }, get T() { return T; }, get NL() { return NL; }, get PH() { return PH; },
+    get WALL() { return WALL; }, get ROAD_WIDTH() { return ROAD_WIDTH; }, get raceT() { return raceT; }, get trackGroup() { return trackGroup; },
+    get multi() { return multi; }, set multi(v) { multi = v; },
+    buildTrack, setTrack, beginRace, startRace, nextTrack, openMenu, startFromHost, pick, hillAt, groundHeight, nextAvailable,
+    autopilot(lane) { debugInput = lane === false ? null : autopilot(lane || 0); },
+    // Run n frames with a fixed time step (works even while the window is hidden)
+    run(n, dt = 1 / 60, noRender = true) {
+      const old = clock.getDelta;
+      clock.getDelta = () => dt; debugNoRender = noRender;
+      try { for (let k = 0; k < n; k++) frame(); } finally { clock.getDelta = old; debugNoRender = false; }
+    },
+  };
+}
 </script>
 </body>
 </html>
