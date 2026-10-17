@@ -16,6 +16,7 @@
   canvas { display:block; }
   #hud { position:fixed; left:16px; top:16px; display:flex; flex-direction:column; gap:8px; font-size:10px;
          text-shadow:2px 2px 0 #000; pointer-events:none; }
+  #lvlName { color:var(--gold); }
   .bar { width:min(240px, 60vw); height:12px; background:rgba(0,0,0,.55); border:2px solid #000; }
   .bar i { display:block; height:100%; width:0; background:var(--gold); }
   #kingDist.close { color:var(--red); }
@@ -27,7 +28,8 @@
   #tip { position:fixed; left:0; right:0; bottom:80px; text-align:center; font-size:9px; color:var(--muted); text-shadow:2px 2px 0 #000; pointer-events:none; padding:0 16px; }
   .overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(10,4,20,.55); padding:16px; }
   .card { background:var(--panel); border:3px solid #000; outline:3px solid #5a4a7a; padding:24px; max-width:520px;
-          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7; }
+          display:flex; flex-direction:column; gap:14px; text-align:center; line-height:1.7;
+          max-height:calc(100vh - 44px); overflow-y:auto; box-sizing:border-box; }
   .card h1 { margin:0; font-size:clamp(20px, 5vw, 32px); color:var(--gold); text-shadow:3px 3px 0 #6a3a00; }
   .card h2 { margin:0; font-size:22px; color:var(--gold); }
   .card p { margin:0; font-size:10px; color:var(--muted); }
@@ -37,6 +39,21 @@
   button.mc { font:inherit; font-size:12px; color:#fff; background:#6b6b6b; border:3px solid #000;
               box-shadow: inset -3px -3px 0 #3a3a3a, inset 3px 3px 0 #a8a8a8; padding:12px 16px; cursor:pointer; text-shadow:2px 2px 0 #333; }
   button.mc:hover, button.mc:focus-visible { background:#7a8ad8; outline:none; }
+  button.mc:disabled { opacity:.45; cursor:not-allowed; }
+  button.mc:disabled:hover { background:#6b6b6b; }
+  /* Level picker on the start card: 6 small Minecraft buttons */
+  .pickTitle { font-size:9px; color:var(--muted); }
+  .levels { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+  .levels button.mc { font-size:12px; padding:8px 4px; line-height:1.5; }
+  .levels small { display:block; font-size:7px; color:var(--muted); margin-top:3px; }
+  /* Secret code box under the level picker */
+  .code { display:flex; align-items:center; justify-content:center; gap:8px; font-size:8px; color:var(--muted); margin:0; flex-wrap:wrap; }
+  .code input { font:inherit; font-size:11px; width:90px; padding:8px; color:#fff; background:#1a1024; border:3px solid #000;
+                box-shadow: inset 2px 2px 0 #000; text-align:center; }
+  .code input:focus { outline:2px solid #7a8ad8; }
+  .code button.mc { font-size:10px; padding:8px 12px; }
+  .codeMsg { font-size:8px; color:var(--red); }
+  .codeMsg.ok { color:#7dff6b; }
   .sens { display:flex; flex-direction:column; gap:8px; font-size:9px; color:var(--muted); }
   .sens input { width:100%; accent-color:#7a8ad8; }
   a.back { font-size:9px; color:var(--muted); }
@@ -47,6 +64,7 @@
 </head>
 <body>
 <div id="hud" hidden>
+  <div id="lvlName">LEVEL 1</div>
   <div>ESCAPE <span id="pct">0%</span></div>
   <div class="bar"><i id="progress"></i></div>
   <div id="kingDist">THE KING IS WAKING UP...</div>
@@ -59,18 +77,28 @@
 <div id="intro" class="overlay">
   <div class="card">
     <h1>KING'S CHASE</h1>
-    <p>The Zombie King is after you! Run all the way to the disco dance floor at the end before he catches you. He smashes through trees and gets faster the longer you run.</p>
+    <p>The Zombie King is after you! Run all the way to the disco dance floor at the end before he catches you. He smashes through trees. Beat all 6 levels!</p>
     <div class="controls">
       <div><b>PC</b>Mouse: look<br>W A S D: move<br>Space: jump<br>P: pause</div>
       <div><b>QUEST</b>Left stick: move<br>Right stick: turn<br>A: jump<br>Y: pause</div>
     </div>
     <button id="playBtn" class="mc" type="button">CLICK TO PLAY</button>
+    <div class="pickTitle">OR PICK A LEVEL</div>
+    <div id="levelPick" class="levels"></div>
+    <form id="codeForm" class="code">
+      <label for="codeInput">SECRET CODE</label>
+      <input id="codeInput" type="text" inputmode="numeric" maxlength="8" autocomplete="off" spellcheck="false">
+      <button id="codeBtn" class="mc" type="submit">OK</button>
+    </form>
+    <div id="codeMsg" class="codeMsg" hidden></div>
     <a class="back" href="index.html">← Back to Arcade</a>
   </div>
 </div>
 
 <div id="endMenu" hidden>
+  <button id="nextBtn" class="mc" type="button">NEXT LEVEL</button>
   <button id="againBtn" class="mc" type="button">PLAY AGAIN</button>
+  <button id="endLevelsBtn" class="mc" type="button">LEVELS</button>
   <button id="endArcadeBtn" class="mc" type="button">BACK TO ARCADE</button>
 </div>
 <div id="pauseMenu" class="overlay" hidden>
@@ -80,7 +108,8 @@
     <label class="sens" for="sens">MOUSE SENSITIVITY: <span id="sensVal">100%</span>
       <input id="sens" type="range" min="0" max="200" step="1" value="100">
     </label>
-    <button id="restartBtn" class="mc" type="button">Restart</button>
+    <button id="restartBtn" class="mc" type="button">Restart Level</button>
+    <button id="levelsBtn" class="mc" type="button">Choose Level</button>
     <button id="arcadeBtn" class="mc" type="button">Back to Arcade</button>
   </div>
 </div>
@@ -99,11 +128,8 @@ import { VRButton } from 'three/addons/webxr/VRButton.js';
 const WALK_SPEED = 4.3;          // blocks per second (same as Minecraft walking). There's no sprint.
 const JUMP_SPEED = 8.4;          // jumps about 1.25 blocks high
 const GRAVITY = 28;
-const KING_START_SPEED = WALK_SPEED;   // same pace as you: every slip-up lets him close in
-const KING_MAX_SPEED = WALK_SPEED;
-const KING_SPEEDUP = 0;          // extra speed per second of running (0 = he never speeds up)
-const KING_HEAD_START = 3;       // seconds before the King starts chasing
-const COURSE_LENGTH = 220;       // blocks from start to the disco at the end
+// The King's speed and head start are different in every level: see LEVELS below.
+const GUARD_WAKE = 12;           // zombie guards climb out of the ground when you get this close
 // Mouse turning uses Minecraft's exact formula. Sensitivity 0.5 is Minecraft's default ("100%"),
 // which turns you 0.15 degrees per pixel of mouse movement. Change it in the pause menu.
 let mcSensitivity = 0.5;
@@ -112,6 +138,80 @@ function radiansPerPixel() {
   const f = mcSensitivity * 0.6 + 0.2;
   return f * f * f * 8 * 0.15 * Math.PI / 180;
 }
+
+// ---------- The 6 levels ----------
+// length: blocks from start to the end wall      ravines: where the gaps you jump over are
+// liquid: what's in the ravines (water/swamp/quicksand slow you down, lava is game over!)
+// walls: canyon walls across the course, you must run through the gap (gapSides: L=left R=right C=middle)
+// trees / treeStyle: how many trees and what kind     hills: how bumpy the ground is (1 = normal)
+// ice: patches of slippery ice     graves: gravestones     guards: zombies that climb out of the ground
+// king: speed (blocks per second, you walk 4.3), max speed, speedup per second, head start in seconds
+const LEVELS = [
+  { name: 'SUNSET MEADOW', short: 'MEADOW', intro: 'Run to the disco before the King gets you!',
+    length: 220, ravines: [55, 105, 160], liquid: 'water', trees: 60, treeStyle: 'oak', seed: 42, hills: 1,
+    king: { speed: 4.3, max: 4.3, speedup: 0, headStart: 3 },
+    theme: { fog: 0xe89a80, fogNear: 25, fogFar: 70, sky: ['#3a3aa0', '#a05a9a', '#ffb070', '#e89a80'],
+      hemi: [0xffd8c0, 0x6a5a8a, 1.6], sun: [0xffc890, 1.6], disc: [0xfff0a0, 26, 22], clouds: [0xffe8f0, 0.9],
+      blocks: { top: '#5fae3c', sideTop: '#5fae3c', dirt: '#7a5434', stone: '#8a8a8a', stoneSpot: '#6a6a6a', log: '#6b4a2a', logDark: '#4a3220',
+        logTop1: '#b08850', logTop2: '#9a7444', leaves: '#3d8a2a', leavesSpot: '#2a5a1a' } } },
+  { name: 'SPOOKY FOREST', short: 'FOREST', intro: 'Dark woods! Weave between the trees.',
+    length: 250, ravines: [50, 95, 140, 190], liquid: 'water', trees: 105, treeStyle: 'oak', seed: 142, hills: 1.1, phase: 2, flatBanks: true,
+    king: { speed: 4.3, max: 4.3, speedup: 0, headStart: 5 },
+    theme: { fog: 0x1c2440, fogNear: 14, fogFar: 46, sky: ['#05050f', '#141a3a', '#2a3460', '#1c2440'],
+      hemi: [0x9aa8d8, 0x302838, 1.7], sun: [0xb0c0ff, 1.1], disc: [0xe8f0ff, 12, 30], clouds: [0x3a4466, 0.8],
+      weather: { color: 0xd8ff60, count: 120, fall: -0.25, size: 0.18, glow: true }, water: 0x203a8a,
+      blocks: { top: '#3e7a34', sideTop: '#3e7a34', dirt: '#5a4030', stone: '#6e6e78', stoneSpot: '#50505a', log: '#4a3220', logDark: '#2a1a10',
+        logTop1: '#8a6a40', logTop2: '#7a5a34', leaves: '#1e5226', leavesSpot: '#0e3216' } } },
+  { name: 'DESERT CANYON', short: 'CANYON', intro: 'Find the gaps in the canyon walls!',
+    length: 270, ravines: [70, 150, 215], liquid: 'quicksand', trees: 55, treeStyle: 'cactus', seed: 242, hills: 1.2, phase: 4, flatBanks: true,
+    walls: [35, 52, 90, 110, 128, 170, 190, 235], gap: 5, gapSides: 'LCRC',
+    king: { speed: 4.3, max: 4.3, speedup: 0, headStart: 5.5 },
+    theme: { fog: 0xf0d8a0, fogNear: 30, fogFar: 85, sky: ['#3a8ae0', '#6ab0f0', '#bfe0f8', '#f0d8a0'],
+      hemi: [0xffffff, 0xc8a060, 1.6], sun: [0xfff0d0, 1.6], disc: [0xffffd0, 16, 60], clouds: [0xffffff, 0.9],
+      blocks: { top: '#e6cf8a', sideTop: null, dirt: '#dcc27c', stone: '#c99a5a', stoneSpot: '#a87840', log: '#4a9a3a', logDark: '#2e6e24',
+        logTop1: '#6ab45a', logTop2: '#5aa44a', leaves: '#4a9a3a', leavesSpot: '#2e6e24' } } },
+  { name: 'FROZEN PEAKS', short: 'PEAKS', intro: 'Big hills, slippery ice. He is faster!',
+    length: 290, ravines: [45, 85, 130, 175, 225], liquid: 'icy', trees: 90, treeStyle: 'spruce', seed: 342, hills: 1.7, phase: 1, flatBanks: true,
+    ice: 28,
+    king: { speed: 4.4, max: 4.4, speedup: 0, headStart: 4 },
+    theme: { fog: 0xdde8f4, fogNear: 20, fogFar: 62, sky: ['#7a9ac8', '#a8c0e0', '#d0e0f0', '#dde8f4'],
+      hemi: [0xf0f4ff, 0x8090a8, 1.5], sun: [0xe0eaff, 1.2], disc: [0xffffff, 12, 30], clouds: [0xf4f8ff, 0.95],
+      weather: { color: 0xffffff, count: 400, fall: 1.6, size: 0.12, glow: false },
+      blocks: { top: '#f2f6fa', sideTop: '#f2f6fa', dirt: '#6a5040', stone: '#8a8e98', stoneSpot: '#6a6e78', log: '#5a3e24', logDark: '#3a2814',
+        logTop1: '#9a7a50', logTop2: '#8a6a44', leaves: '#24543a', leavesSpot: '#eef4f8', leavesSpots: 40, ice: '#9fd4f6' } } },
+  { name: 'HAUNTED GRAVEYARD', short: 'GRAVEYARD', intro: 'Zombies rise from the graves. Dodge them!',
+    length: 300, ravines: [60, 130, 200, 255], liquid: 'swamp', trees: 45, treeStyle: 'dead', seed: 442, hills: 1.1, phase: 3, flatBanks: true,
+    walls: [35, 85, 105, 160, 180, 230], gap: 5, gapSides: 'RCLC', graves: 55, guards: 6, guardSpeed: 1.8,
+    guardColors: [0x5a8a4a, 0x2e5a7a, 0x3a3a6a, 0xff2020],
+    king: { speed: 4.3, max: 4.3, speedup: 0, headStart: 7.5 },
+    theme: { fog: 0x1a2a1c, fogNear: 13, fogFar: 44, sky: ['#020604', '#0a1a10', '#1a3a22', '#1a2a1c'],
+      hemi: [0xa8d8b0, 0x283828, 1.7], sun: [0xc0ffd0, 1.0], disc: [0xd0ffd8, 14, 34], clouds: [0x2a3a2e, 0.8],
+      weather: { color: 0xc8ffd8, count: 80, fall: -0.15, size: 0.22, glow: true }, water: 0x3a5a2a,
+      blocks: { top: '#56683a', sideTop: '#56683a', dirt: '#4a3a2a', stone: '#7a7e86', stoneSpot: '#5a5e66', log: '#5a5048', logDark: '#3a322a',
+        logTop1: '#7a6e60', logTop2: '#6a5e50', leaves: '#3a4a2a', leavesSpot: '#2a3a1a' } } },
+  { name: 'NETHER INFERNO', short: 'NETHER', intro: "Don't fall in the lava! The King is FAST!",
+    length: 320, ravines: [50, 110, 170, 230, 280], liquid: 'lava', trees: 40, treeStyle: 'fungus', seed: 542, hills: 1.2, phase: 5, flatBanks: true,
+    walls: [30, 75, 90, 135, 150, 195, 210, 255], gap: 4, gapSides: 'LCRCLCRC', guards: 8, guardSpeed: 2.0,
+    guardColors: [0xb04a2a, 0x401010, 0x2a1a1a, 0xffd030],
+    king: { speed: 4.3, max: 4.5, speedup: 0.004, headStart: 7.5 },
+    theme: { fog: 0x5a1408, fogNear: 16, fogFar: 52, sky: ['#1a0202', '#4a0a04', '#8a2008', '#5a1408'],
+      hemi: [0xffa080, 0x401010, 1.5], sun: [0xff8040, 1.2], disc: null, clouds: null,
+      weather: { color: 0xff8a30, count: 250, fall: -1.2, size: 0.1, glow: true },
+      blocks: { top: '#9a1a2a', sideTop: '#9a1a2a', dirt: '#6a2626', stone: '#3a3036', stoneSpot: '#2a2026', log: '#7a2a4a', logDark: '#4a1430',
+        logTop1: '#9a3a5a', logTop2: '#8a2a4a', leaves: '#b01818', leavesSpot: '#ff7020' } } },
+];
+const LAST_LEVEL = LEVELS.length;
+
+// ---------- Saved progress (which levels are unlocked, best times) ----------
+let progress = { unlocked: 1, best: {} };
+try {
+  const p = JSON.parse(localStorage.getItem('chaseProgress') || 'null');
+  if (p && typeof p === 'object') {
+    progress.unlocked = Math.max(1, Math.min(LAST_LEVEL, Math.floor(Number(p.unlocked)) || 1));
+    for (const k in (p.best || {})) { const v = Number(p.best[k]); if (v > 0) progress.best[k] = v; }
+  }
+} catch (e) {}
+function saveProgress() { try { localStorage.setItem('chaseProgress', JSON.stringify(progress)); } catch (e) {} }
 
 // ---------- Basic setup ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -170,9 +270,8 @@ if (inQuestApp && navigator.xr) {
 }
 
 const scene = new THREE.Scene();
-const FOG = new THREE.Color(0xe89a80);
-scene.background = FOG.clone();
-scene.fog = new THREE.Fog(FOG, 25, 70);
+scene.background = new THREE.Color(0xe89a80);
+scene.fog = new THREE.Fog(0xe89a80, 25, 70);    // each level sets its own fog colour and distance
 
 const rig = new THREE.Group();
 scene.add(rig);
@@ -180,7 +279,8 @@ const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 2
 camera.rotation.order = 'YXZ';
 rig.add(camera);
 
-scene.add(new THREE.HemisphereLight(0xffd8c0, 0x6a5a8a, 1.6));
+const hemiLight = new THREE.HemisphereLight(0xffd8c0, 0x6a5a8a, 1.6);
+scene.add(hemiLight);
 const sunLight = new THREE.DirectionalLight(0xffc890, 1.6);
 sunLight.position.set(-20, 30, 60);
 scene.add(sunLight);
@@ -208,36 +308,55 @@ function pixTex(seed, draw) {
   return t;
 }
 const speckle = (g, r, base, vary) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { g.fillStyle = shade(base, 1 + (r() - 0.5) * vary); g.fillRect(x, y, 1, 1); } };
+const mat = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, ...extra });
+// Obsidian and portal look the same in every level
 const TEX = {
-  grassTop: pixTex(1, (g, r) => speckle(g, r, '#5fae3c', 0.35)),
-  grassSide: pixTex(2, (g, r) => {
-    speckle(g, r, '#7a5434', 0.35);
-    for (let x = 0; x < 16; x++) { const d = 3 + (r() * 2 | 0); for (let y = 0; y < d; y++) { g.fillStyle = shade('#5fae3c', 1 + (r() - 0.5) * 0.3); g.fillRect(x, y, 1, 1); } }
-  }),
-  dirt: pixTex(3, (g, r) => speckle(g, r, '#7a5434', 0.4)),
-  stone: pixTex(4, (g, r) => { speckle(g, r, '#8a8a8a', 0.3); g.fillStyle = '#6a6a6a'; for (let i = 0; i < 6; i++) g.fillRect(r() * 14 | 0, r() * 14 | 0, 2, 1); }),
-  logSide: pixTex(5, (g, r) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { g.fillStyle = shade(x % 4 === 0 ? '#4a3220' : '#6b4a2a', 1 + (r() - 0.5) * 0.25); g.fillRect(x, y, 1, 1); } }),
-  logTop: pixTex(6, (g, r) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); g.fillStyle = d > 6.5 ? '#4a3220' : shade(d % 2 < 1 ? '#b08850' : '#9a7444', 1 + (r() - 0.5) * 0.15); g.fillRect(x, y, 1, 1); } }),
-  leaves: pixTex(7, (g, r) => { speckle(g, r, '#3d8a2a', 0.5); g.fillStyle = '#2a5a1a'; for (let i = 0; i < 14; i++) g.fillRect(r() * 16 | 0, r() * 16 | 0, 1, 1); }),
   obsidian: pixTex(8, (g, r) => { speckle(g, r, '#1a1028', 0.5); g.fillStyle = '#5a3a8a'; for (let i = 0; i < 6; i++) g.fillRect(r() * 16 | 0, r() * 16 | 0, 1, 1); }),
   portal: pixTex(9, (g, r) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { g.fillStyle = shade('#a040ff', 0.7 + 0.5 * Math.abs(Math.sin((x + y * 0.7) * 0.6 + r()))); g.fillRect(x, y, 1, 1); } }),
 };
 TEX.portal.wrapS = TEX.portal.wrapT = THREE.RepeatWrapping;
-const mat = (map, extra = {}) => new THREE.MeshLambertMaterial({ map, ...extra });
 const MATS = {
-  grass: [mat(TEX.grassSide), mat(TEX.grassSide), mat(TEX.grassTop), mat(TEX.dirt), mat(TEX.grassSide), mat(TEX.grassSide)],
-  dirt: mat(TEX.dirt),
-  stone: mat(TEX.stone),
-  log: [mat(TEX.logSide), mat(TEX.logSide), mat(TEX.logTop), mat(TEX.logTop), mat(TEX.logSide), mat(TEX.logSide)],
-  leaves: mat(TEX.leaves),
   obsidian: mat(TEX.obsidian),
   portal: new THREE.MeshBasicMaterial({ map: TEX.portal, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }),
 };
+// Grass, dirt, stone, wood, leaves and ice change colour with each level's theme.
+// They're made when a level loads and thrown away (disposed) when you leave it.
+function makeThemeMats(b) {
+  const tex = {
+    grassTop: pixTex(1, (g, r) => speckle(g, r, b.top, 0.35)),
+    grassSide: pixTex(2, (g, r) => {
+      speckle(g, r, b.dirt, 0.35);
+      if (b.sideTop) for (let x = 0; x < 16; x++) { const d = 3 + (r() * 2 | 0); for (let y = 0; y < d; y++) { g.fillStyle = shade(b.sideTop, 1 + (r() - 0.5) * 0.3); g.fillRect(x, y, 1, 1); } }
+    }),
+    dirt: pixTex(3, (g, r) => speckle(g, r, b.dirt, 0.4)),
+    stone: pixTex(4, (g, r) => { speckle(g, r, b.stone, 0.3); g.fillStyle = b.stoneSpot; for (let i = 0; i < 6; i++) g.fillRect(r() * 14 | 0, r() * 14 | 0, 2, 1); }),
+    logSide: pixTex(5, (g, r) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { g.fillStyle = shade(x % 4 === 0 ? b.logDark : b.log, 1 + (r() - 0.5) * 0.25); g.fillRect(x, y, 1, 1); } }),
+    logTop: pixTex(6, (g, r) => { for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); g.fillStyle = d > 6.5 ? b.logDark : shade(d % 2 < 1 ? b.logTop1 : b.logTop2, 1 + (r() - 0.5) * 0.15); g.fillRect(x, y, 1, 1); } }),
+    leaves: pixTex(7, (g, r) => { speckle(g, r, b.leaves, 0.5); g.fillStyle = b.leavesSpot; for (let i = 0; i < (b.leavesSpots || 14); i++) g.fillRect(r() * 16 | 0, r() * 16 | 0, 1, 1); }),
+    ice: pixTex(10, (g, r) => { speckle(g, r, b.ice || '#a8d8f8', 0.12); g.fillStyle = 'rgba(255,255,255,0.7)'; for (let i = 0; i < 5; i++) g.fillRect(r() * 12 | 0, r() * 16 | 0, 3 + (r() * 3 | 0), 1); }),
+  };
+  const side = mat(tex.grassSide), dirt = mat(tex.dirt), logSide = mat(tex.logSide), logTop = mat(tex.logTop);
+  return {
+    tex,
+    grass: [side, side, mat(tex.grassTop), dirt, side, side],
+    dirt, stone: mat(tex.stone),
+    log: [logSide, logSide, logTop, logTop, logSide, logSide],
+    leaves: mat(tex.leaves), ice: mat(tex.ice),
+  };
+}
+function disposeThemeMats(m) {
+  for (const k in m.tex) m.tex[k].dispose();
+  const all = new Set([...m.grass, m.dirt, m.stone, ...m.log, m.leaves, m.ice]);
+  for (const x of all) x.dispose();
+}
+let themeMats = null;
 
-// ---------- The world: a grid of blocks ----------
-const W = 24, L = COURSE_LENGTH, H = 20;
-const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, LOG = 4, LEAVES = 5, OBSIDIAN = 6, PORTAL = 7;
-const grid = new Uint8Array(W * H * L);
+// ---------- The world: a grid of blocks (rebuilt for every level) ----------
+const W = 24, H = 20;
+const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, LOG = 4, LEAVES = 5, OBSIDIAN = 6, PORTAL = 7, ICE = 8;
+let L = 220, FINISH_Z = L - 12, RAVINES = [], WALLS = [];
+let grid = new Uint8Array(W * H * L), heights = new Int8Array(W * L);
+let level = 1, loadedLevel = 0, LV = LEVELS[0];
 const at = (x, y, z) => x + W * (y + H * z);
 function get(x, y, z) {
   if (x < 0 || x >= W || z < 0 || z >= L || y < 0) return STONE;   // the edges of the world are solid
@@ -248,70 +367,134 @@ function put(x, y, z, b) { if (x >= 0 && x < W && z >= 0 && z < L && y >= 0 && y
 const isSolid = (x, y, z) => { const b = get(x, y, z); return b !== AIR && b !== PORTAL; };
 const seeThrough = b => b === AIR || b === LEAVES || b === PORTAL;
 
-const START_Z = 8, FINISH_Z = L - 12;
-const RAVINES = [55, 105, 160];            // jump across these!
+const START_Z = 8;
+const WALL_H = 13;                         // columns this tall are walls (nobody can climb them)
 const inRavine = z => RAVINES.some(r => z >= r && z < r + 2);
-const heights = new Int8Array(W * L);
 const colH = (x, z) => (x < 0 || x >= W || z < 0 || z >= L) ? 99 : heights[x + W * z];
 
-for (let z = 0; z < L; z++) {
-  for (let x = 0; x < W; x++) {
-    let h = 4 + Math.round(Math.sin(z * 0.09) * 1.4 + Math.sin(x * 0.33 + z * 0.05) * 1.1 + Math.cos(z * 0.031 + 1) * 1.6);
-    if (z < 14 || z > L - 18) h = 4;                 // flat start and finish
-    h = Math.max(2, Math.min(9, h));
-    if (inRavine(z)) h = 1;
-    if (x === 0 || x === W - 1 || z === 0 || z === L - 1) h = 13;   // tall stone walls around the edge
-    heights[x + W * z] = h;
-  }
-}
-// Staircases so you can climb out if you fall into a ravine
-for (const r of RAVINES) {
-  for (let x = 2; x < W - 2; x++) {
-    const farBank = colH(x, r + 2);
-    const fromLeft = x, fromRight = W - 1 - x;
-    const step = Math.min(fromLeft < 9 ? fromLeft : 99, fromRight < 9 ? fromRight : 99, farBank - 1);
-    if (step >= 2 && step < 99) heights[x + W * (r + 1)] = step;
-  }
-}
-for (let z = 0; z < L; z++) for (let x = 0; x < W; x++) {
-  const h = heights[x + W * z], wall = h === 13;
-  for (let y = 0; y < h; y++) put(x, y, z, wall || y < h - 3 ? STONE : y === h - 1 ? GRASS : DIRT);
-}
-// Trees
-const treeRand = rng(42);
-for (let i = 0; i < 60; i++) {
-  const x = 3 + Math.floor(treeRand() * (W - 6)), z = 18 + Math.floor(treeRand() * (L - 45));
-  if (RAVINES.some(r => z > r - 4 && z < r + 6)) continue;
+// Trees (and cactus, dead trees, nether mushrooms). The King smashes through all of them.
+function placeTree(style, x, z, R) {
   const base = colH(x, z);
-  for (let y = 0; y < 4; y++) put(x, base + y, z, LOG);
-  for (let dy = 2; dy <= 4; dy++) {
-    const rad = dy === 4 ? 1 : 2;
+  const leafLayer = (y, rad) => {
     for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
       if (rad === 2 && Math.abs(dx) === 2 && Math.abs(dz) === 2) continue;
-      if (get(x + dx, base + dy, z + dz) === AIR) put(x + dx, base + dy, z + dz, LEAVES);
+      if (get(x + dx, y, z + dz) === AIR) put(x + dx, y, z + dz, LEAVES);
+    }
+  };
+  if (style === 'oak') {
+    for (let y = 0; y < 4; y++) put(x, base + y, z, LOG);
+    for (let dy = 2; dy <= 4; dy++) leafLayer(base + dy, dy === 4 ? 1 : 2);
+    put(x, base + 5, z, LEAVES);
+  } else if (style === 'spruce') {          // tall pointy snowy pine
+    for (let y = 0; y < 5; y++) put(x, base + y, z, LOG);
+    leafLayer(base + 2, 2); leafLayer(base + 3, 1); leafLayer(base + 4, 2); leafLayer(base + 5, 1);
+    put(x, base + 6, z, LEAVES);
+  } else if (style === 'cactus') {          // 2-3 blocks tall, sometimes with an arm
+    const tall = 2 + (R() * 2 | 0);
+    for (let y = 0; y < tall; y++) put(x, base + y, z, LOG);
+    if (R() < 0.4) { const s = R() < 0.5 ? -1 : 1; put(x + s, base + 1, z, LOG); put(x + s, base + 2, z, LOG); }
+  } else if (style === 'dead') {            // bare spooky tree with a couple of branches
+    const tall = 4 + (R() * 2 | 0);
+    for (let y = 0; y < tall; y++) put(x, base + y, z, LOG);
+    put(x + (R() < 0.5 ? -1 : 1), base + tall - 1, z, LOG);
+    if (R() < 0.6) put(x, base + tall - 2, z + (R() < 0.5 ? -1 : 1), LOG);
+  } else if (style === 'fungus') {          // giant nether mushroom with a red cap
+    for (let y = 0; y < 4; y++) put(x, base + y, z, LOG);
+    leafLayer(base + 4, 2); leafLayer(base + 5, 1);
+  }
+}
+
+function generateWorld(lv) {
+  L = lv.length; FINISH_Z = L - 12; RAVINES = lv.ravines;
+  grid = new Uint8Array(W * H * L);
+  heights = new Int8Array(W * L);
+  const hills = lv.hills ?? 1, ph = lv.phase ?? 0;
+  for (let z = 0; z < L; z++) {
+    for (let x = 0; x < W; x++) {
+      let h = 4 + Math.round(hills * (Math.sin(z * 0.09 + ph) * 1.4 + Math.sin(x * 0.33 + z * 0.05 + ph) * 1.1 + Math.cos(z * 0.031 + 1 + ph) * 1.6));
+      if (z < 14 || z > L - 18) h = 4;                 // flat start and finish
+      h = Math.max(2, Math.min(9, h));
+      if (lv.flatBanks) {
+        // Smooth the ground down to height 4 near the start, the finish and every ravine,
+        // so both sides of a ravine are level (every spot can be jumped) and there are no cliffs
+        let m = Math.min(1, Math.max(0, (z - 14) / 10), Math.max(0, (L - 18 - z) / 10));
+        for (const r of RAVINES) m = Math.min(m, Math.max(0, (Math.abs(z - (r + 0.5)) - 2.5) / 10));
+        h = Math.round(4 + (h - 4) * m);
+      }
+      if (inRavine(z)) h = 1;
+      if (x === 0 || x === W - 1 || z === 0 || z === L - 1) h = WALL_H;   // tall stone walls around the edge
+      heights[x + W * z] = h;
     }
   }
-  put(x, base + 5, z, LEAVES);
+  // Canyon walls across the course with one gap to run through
+  WALLS = [];
+  const sides = lv.gapSides || 'LR', gap = lv.gap || 5;
+  (lv.walls || []).forEach((wz, i) => {
+    const side = sides[i % sides.length];
+    const g0 = side === 'L' ? 1 : side === 'R' ? W - 1 - gap : Math.floor((W - gap) / 2);
+    for (let dz = 0; dz < 2; dz++) for (let x = 1; x < W - 1; x++)
+      if (x < g0 || x >= g0 + gap) heights[x + W * (wz + dz)] = WALL_H;
+    WALLS.push({ z: wz, gx: g0 + gap / 2 });
+  });
+  // Staircases so you can climb out if you fall into a ravine (not in lava: falling in is game over)
+  if (lv.liquid !== 'lava') for (const r of RAVINES) {
+    for (let x = 2; x < W - 2; x++) {
+      const farBank = colH(x, r + 2);
+      const fromLeft = x, fromRight = W - 1 - x;
+      const step = Math.min(fromLeft < 9 ? fromLeft : 99, fromRight < 9 ? fromRight : 99, farBank - 1);
+      if (step >= 2 && step < 99) heights[x + W * (r + 1)] = step;
+    }
+  }
+  for (let z = 0; z < L; z++) for (let x = 0; x < W; x++) {
+    const h = heights[x + W * z], wall = h === WALL_H;
+    for (let y = 0; y < h; y++) put(x, y, z, wall || y < h - 3 ? STONE : y === h - 1 ? GRASS : DIRT);
+  }
+  // Slippery ice patches
+  const iceRand = rng(lv.seed + 1);
+  for (let i = 0; i < (lv.ice || 0); i++) {
+    const cx = 2 + Math.floor(iceRand() * (W - 4)), cz = 18 + Math.floor(iceRand() * (L - 45)), rad = 1.5 + iceRand() * 2;
+    for (let x = Math.floor(cx - rad); x <= cx + rad; x++) for (let z = Math.floor(cz - rad); z <= cz + rad; z++) {
+      if (Math.hypot(x - cx, z - cz) > rad || colH(x, z) >= WALL_H || inRavine(z)) continue;
+      if (get(x, colH(x, z) - 1, z) === GRASS) put(x, colH(x, z) - 1, z, ICE);
+    }
+  }
+  // Trees
+  const treeRand = rng(lv.seed);
+  for (let i = 0; i < lv.trees; i++) {
+    const x = 3 + Math.floor(treeRand() * (W - 6)), z = 18 + Math.floor(treeRand() * (L - 45));
+    if (RAVINES.some(r => z > r - 4 && z < r + 6)) continue;
+    if (WALLS.some(w => z > w.z - 4 && z < w.z + 6) || colH(x, z) >= WALL_H) continue;
+    placeTree(lv.treeStyle, x, z, treeRand);
+  }
+  // Gravestones (1 block tall: jump over them)
+  const graveRand = rng(lv.seed + 2);
+  for (let i = 0; i < (lv.graves || 0); i++) {
+    const x = 2 + Math.floor(graveRand() * (W - 4)), z = 18 + Math.floor(graveRand() * (L - 45));
+    if (RAVINES.some(r => z > r - 3 && z < r + 5) || WALLS.some(w => z > w.z - 3 && z < w.z + 5) || colH(x, z) >= WALL_H) continue;
+    if (get(x, colH(x, z), z) === AIR) put(x, colH(x, z), z, STONE);
+  }
+  // Where the zombie guards are buried
+  guardCount = Math.min(GUARD_MAX, lv.guards || 0);
+  const guardRand = rng(lv.seed + 3);
+  for (let i = 0; i < guardCount; i++) {
+    let z = Math.floor(30 + (i + 0.5) * (L - 75) / guardCount);
+    // (not right next to a ravine, and not near a wall gap where you'd have no room to dodge)
+    while (z < FINISH_Z - 12 && (RAVINES.some(r => z > r - 6 && z < r + 13) || WALLS.some(w => z > w.z - 10 && z < w.z + 12))) z += 2;
+    const x = 3 + Math.floor(guardRand() * (W - 6));
+    guards[i].home.set(x + 0.5, z + 0.5);
+    if (lv.graves && get(x, colH(x, z + 1), z + 1) === AIR) put(x, colH(x, z + 1), z + 1, STONE);   // its gravestone
+  }
 }
-// (The finish is a disco dance floor now: see "The disco at the finish" below)
 
 // ---------- The disco at the finish ----------
 // A light-up dance floor across the end of the course, a spinning disco ball and sweeping light beams.
 // Step onto the dance floor to win!
-const DISCO_X0 = 1, DISCO_X1 = W - 2, DISCO_Z0 = FINISH_Z, DISCO_Z1 = L - 2;
+const DISCO_X0 = 1, DISCO_X1 = W - 2, DISCO_ROWS = 11;
+let DISCO_Z0 = FINISH_Z, DISCO_Z1 = L - 2;
 const DISCO_COLORS = [0xff3df2, 0x33f0ff, 0xffd23d, 0x7dff6b, 0xff7a3d, 0xb07dff].map(c => new THREE.Color(c));
 const discoTiles = [];
 const discoFloor = new THREE.InstancedMesh(new THREE.BoxGeometry(0.94, 0.1, 0.94), new THREE.MeshBasicMaterial({ color: 0xffffff }),
-  (DISCO_X1 - DISCO_X0 + 1) * (DISCO_Z1 - DISCO_Z0 + 1));
-{
-  const m4 = new THREE.Matrix4();
-  for (let z = DISCO_Z0; z <= DISCO_Z1; z++) for (let x = DISCO_X0; x <= DISCO_X1; x++) {
-    const i = discoTiles.length;
-    discoFloor.setMatrixAt(i, m4.makeTranslation(x + 0.5, 4.05, z + 0.5));
-    discoFloor.setColorAt(i, DISCO_COLORS[(x + z) % DISCO_COLORS.length]);
-    discoTiles.push({ x, z });
-  }
-}
+  (DISCO_X1 - DISCO_X0 + 1) * DISCO_ROWS);
 scene.add(discoFloor);
 const glowTex = (() => {
   const c = document.createElement('canvas'); c.width = c.height = 64;
@@ -320,17 +503,15 @@ const glowTex = (() => {
   g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 })();
-const discoCenter = new THREE.Vector3(W / 2, 11, (DISCO_Z0 + DISCO_Z1) / 2 + 0.5);
+const discoCenter = new THREE.Vector3(W / 2, 11, 0);
 // Mirror disco ball on a string
 const discoBall = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16), new THREE.MeshStandardMaterial({
   metalness: 1, roughness: 0.15, emissive: 0x333344,
   map: (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 32; const g = c.getContext('2d');
     for (let y = 0; y < 32; y += 4) for (let x = 0; x < 64; x += 4) { const v = 150 + Math.random() * 105 | 0; g.fillStyle = `rgb(${v},${v},${v + 10})`; g.fillRect(x, y, 3, 3); }
     const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; return t; })() }));
-discoBall.position.copy(discoCenter);
 scene.add(discoBall);
 const string = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 8, 6), new THREE.MeshBasicMaterial({ color: 0x222222 }));
-string.position.copy(discoCenter).add(new THREE.Vector3(0, 5, 0));
 scene.add(string);
 const sparkles = [];
 for (let i = 0; i < 24; i++) {
@@ -341,7 +522,6 @@ for (let i = 0; i < 24; i++) {
 }
 // Colored light beams sweeping out of the ball
 const discoBeams = new THREE.Group();
-discoBeams.position.copy(discoCenter);
 DISCO_COLORS.forEach((col, i) => {
   const beam = new THREE.Mesh(new THREE.ConeGeometry(0.55, 9, 16, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
   beam.geometry.translate(0, -4.5, 0);   // cone tip at the ball, opening downward
@@ -353,6 +533,25 @@ DISCO_COLORS.forEach((col, i) => {
 discoBeams.rotation.order = 'YXZ';
 scene.add(discoBeams);
 const discoLights = DISCO_COLORS.slice(0, 3).map(col => { const l = new THREE.PointLight(col, 18, 16); scene.add(l); return l; });
+// Moves the dance floor, ball and beams to the end of the current level's course
+function placeDisco() {
+  DISCO_Z0 = FINISH_Z; DISCO_Z1 = L - 2;
+  discoTiles.length = 0;
+  const m4 = new THREE.Matrix4();
+  for (let z = DISCO_Z0; z <= DISCO_Z1; z++) for (let x = DISCO_X0; x <= DISCO_X1; x++) {
+    const i = discoTiles.length;
+    discoFloor.setMatrixAt(i, m4.makeTranslation(x + 0.5, 4.05, z + 0.5));
+    discoFloor.setColorAt(i, DISCO_COLORS[(x + z) % DISCO_COLORS.length]);
+    discoTiles.push({ x, z });
+  }
+  discoFloor.instanceMatrix.needsUpdate = true;
+  discoFloor.instanceColor.needsUpdate = true;
+  discoFloor.computeBoundingSphere();
+  discoCenter.set(W / 2, 11, (DISCO_Z0 + DISCO_Z1) / 2 + 0.5);
+  discoBall.position.copy(discoCenter);
+  string.position.copy(discoCenter); string.position.y += 5;
+  discoBeams.position.copy(discoCenter);
+}
 let discoTimer = 0;
 function updateDisco(dt, t, party) {
   discoBall.rotation.y += dt * 0.8;
@@ -402,7 +601,7 @@ const box = new THREE.BoxGeometry(1, 1, 1);
 const blockMesh = {};          // block type -> InstancedMesh
 const breakable = new Map();   // grid index -> { mesh, i }
 function buildWorld() {
-  const lists = { [GRASS]: [], [DIRT]: [], [STONE]: [], [LOG]: [], [LEAVES]: [], [OBSIDIAN]: [], [PORTAL]: [] };
+  const lists = { [GRASS]: [], [DIRT]: [], [STONE]: [], [LOG]: [], [LEAVES]: [], [OBSIDIAN]: [], [PORTAL]: [], [ICE]: [] };
   for (let z = 0; z < L; z++) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const b = grid[at(x, y, z)];
     if (b === AIR) continue;
@@ -411,25 +610,28 @@ function buildWorld() {
       seeThrough(get(x, y - 1, z)) || seeThrough(get(x, y, z + 1)) || seeThrough(get(x, y, z - 1));
     if (visible) lists[b].push(x, y, z);
   }
-  const m4 = new THREE.Matrix4();
-  const materials = { [GRASS]: MATS.grass, [DIRT]: MATS.dirt, [STONE]: MATS.stone, [LOG]: MATS.log, [LEAVES]: MATS.leaves, [OBSIDIAN]: MATS.obsidian, [PORTAL]: MATS.portal };
+  const m4 = new THREE.Matrix4(), tm = themeMats;
+  const materials = { [GRASS]: tm.grass, [DIRT]: tm.dirt, [STONE]: tm.stone, [LOG]: tm.log, [LEAVES]: tm.leaves, [OBSIDIAN]: MATS.obsidian, [PORTAL]: MATS.portal, [ICE]: tm.ice };
   for (const type in lists) {
     const p = lists[type], n = p.length / 3;
+    if (n === 0) continue;
     const mesh = new THREE.InstancedMesh(box, materials[type], n);
     for (let i = 0; i < n; i++) {
       const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
       mesh.setMatrixAt(i, m4.makeTranslation(x + 0.5, y + 0.5, z + 0.5));
       if (+type === LOG || +type === LEAVES) breakable.set(at(x, y, z), { mesh, i, type: +type, x, y, z });
     }
+    mesh.computeBoundingSphere();
     scene.add(mesh);
     blockMesh[type] = mesh;
   }
 }
-buildWorld();
 
 // Blocks the King smashes (remembered so Restart can put the trees back)
 const smashed = [];
 const zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+const smashPos = new THREE.Vector3();
+let burstColors = { log: 0x6b4a2a, leaves: 0x3d8a2a };
 function smashBlock(x, y, z) {
   const key = at(x, y, z), info = breakable.get(key);
   if (!info || grid[key] === AIR) return;
@@ -437,7 +639,7 @@ function smashBlock(x, y, z) {
   info.mesh.setMatrixAt(info.i, zeroMatrix);
   info.mesh.instanceMatrix.needsUpdate = true;
   smashed.push(info);
-  burst(new THREE.Vector3(x + 0.5, y + 0.5, z + 0.5), info.type === LOG ? 0x6b4a2a : 0x3d8a2a, 6);
+  burst(smashPos.set(x + 0.5, y + 0.5, z + 0.5), info.type === LOG ? burstColors.log : burstColors.leaves, 6);
   if (Math.random() < 0.3) noise(0.12, 'lowpass', 900, 0.25);
 }
 function restoreTrees() {
@@ -450,41 +652,90 @@ function restoreTrees() {
   smashed.length = 0;
 }
 
-// Water in the ravines
-for (const r of RAVINES) {
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(W - 2, 2),
-    new THREE.MeshLambertMaterial({ color: 0x3a6aff, transparent: true, opacity: 0.7, depthWrite: false }));
-  water.rotation.x = -Math.PI / 2;
-  water.position.set(W / 2, 1.8, r + 1);
-  scene.add(water);
-}
+// Water (or swamp, quicksand, icy water, lava) in the ravines: one shared shape, one material per level
+const liquidGeo = new THREE.PlaneGeometry(W - 2, 2);
+const liquids = [];
+let liquidMat = null;
+const LIQUIDS = {
+  water: { color: 0x3a6aff, opacity: 0.7, slow: 0.6 },
+  swamp: { color: 0x3a5a2a, opacity: 0.85, slow: 0.6 },
+  icy: { color: 0x7ab8ff, opacity: 0.75, slow: 0.6 },
+  quicksand: { color: 0xc8a060, opacity: 0.95, slow: 0.4 },
+  lava: { color: 0xff5a10, opacity: 1, slow: 1, deadly: true },
+};
 
-// ---------- Sky: sunset gradient, a square sun and blocky clouds ----------
+// ---------- Sky: gradient, a square sun (or moon) and blocky clouds ----------
 const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 4; skyCanvas.height = 256;
-{
-  const g = skyCanvas.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0, '#3a3aa0'); grd.addColorStop(0.35, '#a05a9a'); grd.addColorStop(0.5, '#ffb070'); grd.addColorStop(1, '#e89a80');
-  g.fillStyle = grd; g.fillRect(0, 0, 4, 256);
-}
 const skyTex = new THREE.CanvasTexture(skyCanvas);
 skyTex.colorSpace = THREE.SRGBColorSpace;
+function paintSky(stops) {
+  const g = skyCanvas.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, stops[0]); grd.addColorStop(0.35, stops[1]); grd.addColorStop(0.5, stops[2]); grd.addColorStop(1, stops[3]);
+  g.fillStyle = grd; g.fillRect(0, 0, 4, 256);
+  skyTex.needsUpdate = true;
+}
+// The sky ball follows you around so it always surrounds you
 const sky = new THREE.Mesh(new THREE.SphereGeometry(150, 24, 12), new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false }));
 scene.add(sky);
 const sun = new THREE.Mesh(new THREE.PlaneGeometry(26, 26), new THREE.MeshBasicMaterial({ color: 0xfff0a0, fog: false }));
-sun.position.set(W / 2, 22, L + 110);
-sun.lookAt(W / 2, 4, 0);
+sun.position.set(W / 2, 22, 120);
+sun.lookAt(W / 2, 4, 0);                   // faces back down the course, toward you
+let sunY = 22;
 scene.add(sun);
 const clouds = [];
+const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffe8f0, transparent: true, opacity: 0.9, fog: false });
 {
-  const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffe8f0, transparent: true, opacity: 0.9, fog: false });
   const cr = rng(7);
   for (let i = 0; i < 26; i++) {
     const c = new THREE.Mesh(new THREE.BoxGeometry(6 + cr() * 10, 1.2, 4 + cr() * 6), cloudMat);
-    c.position.set(-40 + cr() * (W + 80), 32 + cr() * 4, -20 + cr() * (L + 40));
+    cr(); cr(); cr();
     scene.add(c);
     clouds.push(c);
   }
+}
+function placeClouds() {
+  const cr = rng(7);
+  for (const c of clouds) { cr(); cr(); c.position.set(-40 + cr() * (W + 80), 32 + cr() * 4, -20 + cr() * (L + 40)); }
+}
+
+// Falling snow, rising embers or floating fireflies (one cheap point cloud that stays around you)
+const WEATHER_MAX = 400;
+const weatherPos = new Float32Array(WEATHER_MAX * 3);
+const weatherGeo = new THREE.BufferGeometry();
+weatherGeo.setAttribute('position', new THREE.BufferAttribute(weatherPos, 3));
+const weatherMat = new THREE.PointsMaterial({ size: 0.12, map: glowTex, transparent: true, depthWrite: false });
+const weather = new THREE.Points(weatherGeo, weatherMat);
+weather.frustumCulled = false;
+weather.visible = false;
+scene.add(weather);
+let weatherFall = 0, weatherN = 0;
+function setupWeather(w) {
+  weather.visible = !!w;
+  if (!w) return;
+  weatherN = w.count; weatherFall = w.fall;
+  weatherMat.color.set(w.color); weatherMat.size = w.size;
+  weatherMat.blending = w.glow ? THREE.AdditiveBlending : THREE.NormalBlending;
+  weatherMat.needsUpdate = true;
+  weatherGeo.setDrawRange(0, weatherN);
+  const wr = rng(99);
+  for (let i = 0; i < weatherN; i++) {
+    weatherPos[i * 3] = W / 2 + (wr() - 0.5) * 30; weatherPos[i * 3 + 1] = wr() * 14; weatherPos[i * 3 + 2] = START_Z + (wr() - 0.5) * 30;
+  }
+  weatherGeo.attributes.position.needsUpdate = true;
+}
+function updateWeather(dt, t) {
+  if (!weather.visible) return;
+  const px = player.pos.x, py = player.pos.y, pz = player.pos.z;
+  for (let i = 0; i < weatherN; i++) {
+    const j = i * 3;
+    let x = weatherPos[j] + Math.sin(t * 0.7 + i) * 0.3 * dt, y = weatherPos[j + 1] - weatherFall * dt, z = weatherPos[j + 2];
+    if (y < py - 3) y += 14; else if (y > py + 11) y -= 14;          // wrap around you so it never runs out
+    if (x < px - 15) x += 30; else if (x > px + 15) x -= 30;
+    if (z < pz - 15) z += 30; else if (z > pz + 15) z -= 30;
+    weatherPos[j] = x; weatherPos[j + 1] = y; weatherPos[j + 2] = z;
+  }
+  weatherGeo.attributes.position.needsUpdate = true;
 }
 
 // ---------- Sound (made with code) ----------
@@ -518,12 +769,15 @@ function roar() {
   o.start(); o.stop(t + 1.5);
   noise(1.2, 'lowpass', 300, 0.4);
 }
+const groan = () => { beep(120, 0.6, 'sawtooth', 0.07); noise(0.4, 'lowpass', 400, 0.15); };
 
 // ---------- Particles ----------
 const particles = [];
 const pGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+const burstMats = new Map();   // one material per colour, reused for every burst
 function burst(pos, color, count = 10, speed = 4) {
-  const m = new THREE.MeshLambertMaterial({ color });
+  let m = burstMats.get(color);
+  if (!m) { m = new THREE.MeshLambertMaterial({ color }); burstMats.set(color, m); }
   for (let i = 0; i < count; i++) {
     const p = new THREE.Mesh(pGeo, m);
     p.position.copy(pos);
@@ -567,6 +821,92 @@ const king = makeKing();
 scene.add(king);
 const kingState = { pos: new THREE.Vector3(), vy: 0, phase: 0, active: false, stepSign: 1 };
 
+// The King follows your footprints, so he can chase you through the gaps in canyon walls.
+// (When he can see you, he just walks straight at you.)
+const trailX = [], trailZ = [];
+let trailIdx = 0;
+// Is there a straight path from a to b that doesn't go through a wall? (checks a King-wide strip)
+function clearLine(ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+  if (len < 0.01) return true;
+  const ox = -dz / len * 0.6, oz = dx / len * 0.6;
+  for (let s = 0; s <= len; s += 0.5) {
+    const x = ax + dx * s / len, z = az + dz * s / len;
+    if (colH(Math.floor(x), Math.floor(z)) >= WALL_H || colH(Math.floor(x + ox), Math.floor(z + oz)) >= WALL_H ||
+        colH(Math.floor(x - ox), Math.floor(z - oz)) >= WALL_H) return false;
+  }
+  return true;
+}
+
+// ---------- Zombie guards (graveyard and nether levels) ----------
+// Plain zombies buried along the course. They climb out when you get close and shuffle toward you.
+// They're slower than you, but touching one is game over. All of them share the same shapes and colours.
+const GUARD_MAX = 10;
+let guardCount = 0;
+const guardMats = [0, 0, 0, 0].map(() => new THREE.MeshLambertMaterial());   // skin, shirt, pants, eyes
+guardMats[3] = new THREE.MeshBasicMaterial();
+const guardGeo = {
+  leg: new THREE.BoxGeometry(0.2, 0.8, 0.22).translate(0, -0.4, 0),
+  body: new THREE.BoxGeometry(0.5, 0.7, 0.28),
+  arm: new THREE.BoxGeometry(0.15, 0.7, 0.15).translate(0, -0.3, 0),
+  head: new THREE.BoxGeometry(0.4, 0.4, 0.4),
+  eyes: new THREE.BoxGeometry(0.26, 0.05, 0.02),
+};
+function makeGuard() {
+  const gr = new THREE.Group();
+  const legs = [-0.12, 0.12].map(x => { const m = new THREE.Mesh(guardGeo.leg, guardMats[2]); m.position.set(x, 0.8, 0); gr.add(m); return m; });
+  const body = new THREE.Mesh(guardGeo.body, guardMats[1]); body.position.y = 1.15; gr.add(body);
+  const arms = [-0.33, 0.33].map(x => { const m = new THREE.Mesh(guardGeo.arm, guardMats[0]); m.position.set(x, 1.45, 0); m.rotation.x = -Math.PI / 2; gr.add(m); return m; });
+  const head = new THREE.Mesh(guardGeo.head, guardMats[0]); head.position.y = 1.7; gr.add(head);
+  const eyes = new THREE.Mesh(guardGeo.eyes, guardMats[3]); eyes.position.set(0, 1.75, 0.205); gr.add(eyes);
+  gr.visible = false;
+  scene.add(gr);
+  return { mesh: gr, legs, arms, pos: new THREE.Vector3(), home: new THREE.Vector2(), awake: false, emerging: false, phase: 0 };
+}
+const guards = Array.from({ length: GUARD_MAX }, makeGuard);
+const guardBurst = new THREE.Vector3();
+// Moves the guards; returns how close the nearest one is to you
+function updateGuards(dt) {
+  let nearest = 99;
+  for (let i = 0; i < guardCount; i++) {
+    const g = guards[i];
+    const dx = player.pos.x - g.pos.x, dz = player.pos.z - g.pos.z, dist = Math.hypot(dx, dz);
+    if (!g.awake) {
+      if (state === 'run' && dist < GUARD_WAKE) {
+        g.awake = true; g.emerging = true; g.mesh.visible = true;
+        g.pos.y = colH(Math.floor(g.pos.x), Math.floor(g.pos.z)) - 1.9;
+        groan();
+      }
+      continue;
+    }
+    const ground = colH(Math.floor(g.pos.x), Math.floor(g.pos.z));
+    if (g.emerging) {   // climbing out of the ground
+      g.pos.y += dt * 2.6;
+      if (Math.random() < dt * 12) burst(guardBurst.set(g.pos.x, ground + 0.2, g.pos.z), 0x7a5434, 2, 3);
+      if (g.pos.y >= ground) { g.pos.y = ground; g.emerging = false; }
+    } else if (state === 'run' && dist < 22) {
+      // Shuffle toward you (they can't walk through walls)
+      const step = LV.guardSpeed * dt / Math.max(dist, 0.01);
+      const nx = g.pos.x + dx * step, nz = g.pos.z + dz * step;
+      if (colH(Math.floor(nx), Math.floor(g.pos.z)) < WALL_H) g.pos.x = nx;
+      if (colH(Math.floor(g.pos.x), Math.floor(nz)) < WALL_H) g.pos.z = nz;
+      const gr = colH(Math.floor(g.pos.x), Math.floor(g.pos.z));
+      g.pos.y = g.pos.y < gr ? Math.min(gr, g.pos.y + dt * 5) : Math.max(gr, g.pos.y - dt * 8);
+      g.phase += dt * 7;
+      g.mesh.rotation.y = Math.atan2(dx, dz);
+      if (Math.random() < dt * 0.1) groan();
+    }
+    if (state === 'run' && !g.emerging && dist < 0.75 && Math.abs(player.pos.y - g.pos.y) < 1.8) endGame(false, 'guard');
+    nearest = Math.min(nearest, dist);
+    // Pose
+    g.mesh.position.copy(g.pos);
+    const s = Math.sin(g.phase);
+    g.legs[0].rotation.x = s * 0.6; g.legs[1].rotation.x = -s * 0.6;
+    g.arms[0].rotation.x = -Math.PI / 2 + s * 0.15; g.arms[1].rotation.x = -Math.PI / 2 - s * 0.15;
+  }
+  return nearest;
+}
+
 // ---------- Player ----------
 const HW = 0.3, PH = 1.8, EYE = 1.62;     // half-width, height, eye height (Minecraft sizes)
 const player = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: Math.PI, pitch: 0, onGround: false, walkPhase: 0 };
@@ -598,7 +938,7 @@ arm.position.set(0.32, -0.32, -0.45);
 arm.rotation.set(0.2, -0.25, 0);
 camera.add(arm);
 
-// ---------- Messages in front of your eyes (countdown, caught, escaped) ----------
+// ---------- Messages in front of your eyes (level name, countdown, caught, escaped) ----------
 const msgCanvas = document.createElement('canvas');
 msgCanvas.width = 1024; msgCanvas.height = 320;
 const msgTex = new THREE.CanvasTexture(msgCanvas);
@@ -607,6 +947,7 @@ msg.position.set(0, 0.12, -1.4);
 msg.renderOrder = 999;
 msg.visible = false;
 camera.add(msg);
+// sub can have two lines, split with \n
 function showMessage(title, sub = '', color = '#ffc830') {
   const g = msgCanvas.getContext('2d');
   g.clearRect(0, 0, 1024, 320);
@@ -616,10 +957,13 @@ function showMessage(title, sub = '', color = '#ffc830') {
   g.fillStyle = '#000'; g.fillText(title, 518, 128);
   g.fillStyle = color; g.fillText(title, 512, 122);
   if (sub) {
-    size = 34;
-    do { g.font = `${size}px "Press Start 2P", monospace`; size -= 2; } while (g.measureText(sub).width > 980 && size > 12);
-    g.fillStyle = '#000'; g.fillText(sub, 515, 243);
-    g.fillStyle = '#fff'; g.fillText(sub, 512, 240);
+    const lines = sub.split('\n').slice(0, 2), ys = lines.length > 1 ? [218, 276] : [240];
+    lines.forEach((line, i) => {
+      size = 34;
+      do { g.font = `${size}px "Press Start 2P", monospace`; size -= 2; } while (g.measureText(line).width > 980 && size > 12);
+      g.fillStyle = '#000'; g.fillText(line, 515, ys[i] + 3);
+      g.fillStyle = '#fff'; g.fillText(line, 512, ys[i]);
+    });
   }
   msgTex.needsUpdate = true;
   msg.visible = true;
@@ -647,9 +991,52 @@ pauseSign.renderOrder = 1000;
 pauseSign.visible = false;
 camera.add(pauseSign);
 
+// ---------- Loading a level ----------
+function loadLevel(n) {
+  // Throw away the old level first (frees its memory on the Quest)
+  for (const t in blockMesh) { scene.remove(blockMesh[t]); blockMesh[t].dispose(); delete blockMesh[t]; }
+  breakable.clear(); smashed.length = 0;
+  for (const w of liquids) scene.remove(w);
+  liquids.length = 0;
+  if (liquidMat) liquidMat.dispose();
+  if (themeMats) disposeThemeMats(themeMats);
+
+  level = n; LV = LEVELS[n - 1];
+  const th = LV.theme;
+  themeMats = makeThemeMats(th.blocks);
+  burstColors = { log: parseInt(th.blocks.log.slice(1), 16), leaves: parseInt(th.blocks.leaves.slice(1), 16) };
+  generateWorld(LV);
+  buildWorld();
+  // Ravine liquid
+  const lq = LIQUIDS[LV.liquid];
+  liquidMat = lq.deadly ? new THREE.MeshBasicMaterial({ color: lq.color })
+    : new THREE.MeshLambertMaterial({ color: th.water ?? lq.color, transparent: true, opacity: lq.opacity, depthWrite: false });
+  for (const r of RAVINES) {
+    const m = new THREE.Mesh(liquidGeo, liquidMat);
+    m.rotation.x = -Math.PI / 2;
+    m.position.set(W / 2, lq.deadly ? 3.7 : 1.8, r + 1);   // lava is filled almost to the top so you can see it coming
+    scene.add(m); liquids.push(m);
+  }
+  // Sky, fog, light, sun, clouds, weather
+  scene.background.set(th.fog);
+  scene.fog.color.set(th.fog); scene.fog.near = th.fogNear; scene.fog.far = th.fogFar;
+  paintSky(th.sky);
+  hemiLight.color.set(th.hemi[0]); hemiLight.groundColor.set(th.hemi[1]); hemiLight.intensity = th.hemi[2];
+  sunLight.color.set(th.sun[0]); sunLight.intensity = th.sun[1];
+  sun.visible = !!th.disc;
+  if (th.disc) { sun.material.color.set(th.disc[0]); sun.scale.setScalar(th.disc[1] / 26); sunY = th.disc[2]; }
+  for (const c of clouds) c.visible = !!th.clouds;
+  if (th.clouds) { cloudMat.color.set(th.clouds[0]); cloudMat.opacity = th.clouds[1]; }
+  placeClouds();
+  setupWeather(th.weather);
+  if (LV.guardColors) LV.guardColors.forEach((c, i) => guardMats[i].color.set(c));
+  placeDisco();
+  loadedLevel = n;
+}
+
 // ---------- Game state ----------
-let state = 'intro';        // intro → countdown → run → caught / escaped
-let stateT = 0, runT = 0, paused = false, heartbeatT = 0;
+let state = 'intro';        // intro → levelIntro → countdown → run → caught / escaped
+let stateT = 0, runT = 0, paused = false, heartbeatT = 0, introDur = 3.5, lastStarted = 0;
 const $ = id => document.getElementById(id);
 
 function resetWorld() {
@@ -664,40 +1051,112 @@ function resetWorld() {
   king.rotation.y = 0;
   for (const p of particles) scene.remove(p);
   particles.length = 0;
+  trailX.length = trailZ.length = 0;
+  trailX.push(kingState.pos.x, player.pos.x); trailZ.push(kingState.pos.z, player.pos.z);
+  trailIdx = 0;
+  for (let i = 0; i < GUARD_MAX; i++) {
+    const g = guards[i];
+    g.awake = false; g.emerging = false; g.mesh.visible = false; g.phase = 0;
+    g.pos.set(g.home.x, -5, g.home.y);
+    g.mesh.position.copy(g.pos);
+  }
 }
 
+// Start (or restart) level n
+function startLevel(n) {
+  if (n !== loadedLevel) loadLevel(n);
+  startGame();
+}
+// Start (or restart) the current level
 function startGame() {
   stopDiscoMusic();
   resetWorld();
-  state = 'countdown'; stateT = 0; runT = 0;
+  introDur = lastStarted === level ? 1.5 : 3.5;     // a retry gets a shorter intro
+  lastStarted = level;
+  state = 'levelIntro'; stateT = 0; runT = 0; msgShownFor = '';
+  showMessage(`LEVEL ${level}`, `${LV.name}\n${LV.intro}`, '#ffc830');
+  $('lvlName').textContent = `LEVEL ${level} · ${LV.name}`;
   $('intro').hidden = true;
   $('endMenu').hidden = true;
   $('hud').hidden = renderer.xr.isPresenting;
   $('cross').hidden = renderer.xr.isPresenting;
   $('pauseBtn').hidden = false;
+  $('danger').style.opacity = '0';
   try { ac().resume(); } catch (e) {}
   document.activeElement?.blur();   // so Space jumps instead of pressing a menu button
   lockMouse();
 }
 
-function endGame(won) {
+let endReason = '';
+function endGame(won, why = 'king') {
   state = won ? 'escaped' : 'caught';
-  // Free the mouse and show "Play again" / "Back to arcade" buttons
+  endReason = won ? 'won' : why;
+  // Free the mouse and show "Next level" / "Play again" / "Back to arcade" buttons
   if (document.pointerLockElement) document.exitPointerLock();
+  const last = level === LAST_LEVEL;
+  $('nextBtn').hidden = !won;
+  $('nextBtn').textContent = last ? 'BACK TO LEVEL 1' : 'NEXT LEVEL';
+  $('againBtn').textContent = won ? 'PLAY AGAIN' : 'TRY AGAIN';
   $('endMenu').hidden = renderer.xr.isPresenting;
   stateT = 0;
   if (won) {
-    showMessage('DANCE PARTY!', `you escaped in ${runT.toFixed(1)}s · ${pressToRestart()}`, '#ff3df2');
+    // Save: best time for this level, and unlock the next one
+    const prev = progress.best[level], newBest = !(prev <= runT);
+    if (newBest) progress.best[level] = Math.round(runT * 10) / 10;
+    progress.unlocked = Math.max(progress.unlocked, Math.min(LAST_LEVEL, level + 1));
+    saveProgress();
+    refreshLevelPicker();
+    const time = `${runT.toFixed(1)}s` + (newBest ? ' NEW BEST!' : ` (best ${prev.toFixed(1)}s)`);
+    if (last) showMessage('YOU BEAT ALL 6 LEVELS!', `level ${level} in ${time}\n${pressToRestart()}`, '#ff3df2');
+    else showMessage('DANCE PARTY!', `level ${level} done in ${time}\n${pressToRestart()}`, '#ff3df2');
     [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => beep(f, 0.25, 'square', 0.1), i * 120));
     for (const c of [0xff3df2, 0x33f0ff, 0xffd23d]) burst(player.pos.clone().add(new THREE.Vector3(0, 2, 0)), c, 20, 6);
     setTimeout(startDiscoMusic, 700);
   } else {
-    showMessage('THE KING GOT YOU!', `you ran ${Math.max(0, Math.floor(player.pos.z - START_Z))} blocks · ${pressToRestart()}`, '#ff3d3d');
-    roar();
+    const title = why === 'guard' ? 'A ZOMBIE GOT YOU!' : why === 'lava' ? 'YOU FELL IN THE LAVA!' : 'THE KING GOT YOU!';
+    showMessage(title, `level ${level} · you ran ${Math.max(0, Math.floor(player.pos.z - START_Z))} blocks\n${pressToRestart()}`, '#ff3d3d');
+    if (why === 'lava') { noise(0.8, 'lowpass', 1200, 0.4); burst(player.pos, 0xff7020, 20, 5); }
+    else roar();
     beep(200, 0.6, 'sawtooth', 0.2);
   }
 }
-const pressToRestart = () => renderer.xr.isPresenting ? 'trigger to retry  -  Y for arcade' : 'click to retry';
+const pressToRestart = () => {
+  const what = state === 'escaped' ? (level === LAST_LEVEL ? 'back to level 1' : 'next level') : 'retry';
+  return renderer.xr.isPresenting ? `trigger: ${what}  -  Y for arcade` : `click: ${what}`;
+};
+// After winning go to the next level (after the last one, back to level 1); after losing, retry this level
+function continueAfterEnd() {
+  if (state === 'escaped') startLevel(level >= LAST_LEVEL ? 1 : level + 1);
+  else startLevel(level);
+}
+// Back to the start card with the level picker
+function showLevelMenu() {
+  paused = false;
+  $('pauseMenu').hidden = true; pauseSign.visible = false;
+  stopDiscoMusic();
+  state = 'intro';
+  resetWorld();
+  msg.visible = false;
+  $('endMenu').hidden = true; $('hud').hidden = true; $('cross').hidden = true; $('pauseBtn').hidden = true;
+  $('danger').style.opacity = '0';
+  if (document.pointerLockElement) document.exitPointerLock();
+  refreshLevelPicker();
+  $('intro').hidden = false;
+}
+// Level picker buttons on the start card: locked levels show a padlock, unlocked ones show your best time
+function refreshLevelPicker() {
+  const box = $('levelPick');
+  box.textContent = '';
+  LEVELS.forEach((lv, i) => {
+    const n = i + 1, open = n <= progress.unlocked, best = progress.best[n];
+    const b = document.createElement('button');
+    b.className = 'mc'; b.type = 'button'; b.disabled = !open; b.title = lv.name;
+    b.innerHTML = `${open ? n : '🔒' + n}<small>${lv.short}</small><small>${!open ? 'LOCKED' : best ? 'BEST ' + best.toFixed(1) + 's' : '--'}</small>`;
+    b.addEventListener('click', () => startLevel(n));
+    box.appendChild(b);
+  });
+  $('playBtn').textContent = `PLAY LEVEL ${progress.unlocked}`;
+}
 
 // ---------- Mouse look (Minecraft style) ----------
 let locked = false, freeLook = false;
@@ -725,9 +1184,10 @@ function useFreeLook() {
   $('tip').hidden = false;
   setTimeout(() => { $('tip').hidden = true; }, 6000);
 }
+const playing = () => state === 'run' || state === 'countdown' || state === 'levelIntro';
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
-  if (!locked && !freeLook && (state === 'run' || state === 'countdown') && !paused && !renderer.xr.isPresenting) setPaused(true);
+  if (!locked && !freeLook && playing() && !paused && !renderer.xr.isPresenting) setPaused(true);
 });
 addEventListener('mousemove', e => {
   mouseX = e.clientX;
@@ -751,12 +1211,16 @@ function edgeTurn(dt) {
 }
 renderer.domElement.addEventListener('mousedown', e => {
   if (e.button !== 0 || renderer.xr.isPresenting) return;
-  if ((state === 'caught' || state === 'escaped') && stateT > 1.2) { startGame(); return; }
-  if (!locked && !freeLook && (state === 'run' || state === 'countdown') && !paused) lockMouse();
+  if ((state === 'caught' || state === 'escaped') && stateT > 1.2) { continueAfterEnd(); return; }
+  if (state === 'levelIntro' && !paused && stateT > 0.3) stateT = introDur;   // click skips the level intro
+  if (!locked && !freeLook && playing() && !paused) lockMouse();
 });
 
 const keys = {};
+// Typing in a text box (the secret code) must not move you, jump or pause
+const typingInBox = e => e.target && (e.target.tagName === 'INPUT' && e.target.type === 'text');
 addEventListener('keydown', e => {
+  if (typingInBox(e)) return;
   keys[e.code] = true;
   if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   // P pauses (and unlocks the mouse); P again resumes (and locks it again)
@@ -784,7 +1248,8 @@ $('sens').addEventListener('input', () => {
   try { localStorage.setItem('mcSensitivity', String(mcSensitivity)); } catch (e) {}
 });
 $('resumeBtn').addEventListener('click', () => { setPaused(false); document.activeElement?.blur(); lockMouse(); });
-$('restartBtn').addEventListener('click', () => { setPaused(false); startGame(); });
+$('restartBtn').addEventListener('click', () => { setPaused(false); startGame(); });   // restarts the level you're on
+$('levelsBtn').addEventListener('click', showLevelMenu);
 // The app's file viewer can't switch pages; if the page didn't change, explain where to play instead
 function cantSwitchPagesNotice() {
   if (location.protocol !== 'file:') return;
@@ -802,7 +1267,20 @@ function goToArcade() {
 $('arcadeBtn').addEventListener('click', goToArcade);
 $('endArcadeBtn').addEventListener('click', goToArcade);
 $('againBtn').addEventListener('click', () => startGame());
-$('playBtn').addEventListener('click', startGame);
+$('nextBtn').addEventListener('click', () => startLevel(level >= LAST_LEVEL ? 1 : level + 1));
+$('endLevelsBtn').addEventListener('click', showLevelMenu);
+$('playBtn').addEventListener('click', () => startLevel(progress.unlocked));   // the highest level you've unlocked
+// Secret code: 7656 unlocks every level (OK button or Enter)
+$('codeForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const ok = $('codeInput').value.trim() === '7656';
+  if (ok) { progress.unlocked = LAST_LEVEL; saveProgress(); refreshLevelPicker(); }
+  $('codeMsg').textContent = ok ? 'CODE ACCEPTED! ALL LEVELS UNLOCKED.' : 'WRONG CODE.';
+  $('codeMsg').classList.toggle('ok', ok);
+  $('codeMsg').hidden = false;
+  $('codeInput').value = '';
+  $('codeInput').blur();
+});
 document.addEventListener('visibilitychange', () => { if (document.hidden && state !== 'intro') setPaused(true); });
 
 // ---------- VR controllers ----------
@@ -812,13 +1290,16 @@ for (let i = 0; i < 2; i++) {
   const c = renderer.xr.getController(i);
   c.addEventListener('connected', e => { c.userData.input = e.data; });
   c.addEventListener('disconnected', () => { c.userData.input = null; });
-  c.addEventListener('selectstart', () => { if ((state === 'caught' || state === 'escaped') && stateT > 1.2) startGame(); });
+  c.addEventListener('selectstart', () => {
+    if ((state === 'caught' || state === 'escaped') && stateT > 1.2) continueAfterEnd();
+    else if (state === 'levelIntro' && !paused && stateT > 0.3) stateT = introDur;   // trigger skips the level intro
+  });
   rig.add(c);
   controllers.push(c);
 }
 renderer.xr.addEventListener('sessionstart', () => {
   $('hud').hidden = true; $('cross').hidden = true; arm.visible = false; vrHud.visible = true;
-  if (state === 'intro') startGame();
+  if (state === 'intro') startLevel(progress.unlocked);
   const session = renderer.xr.getSession();
   session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible') setPaused(true); });
 });
@@ -828,15 +1309,16 @@ renderer.xr.addEventListener('sessionend', () => {
 });
 
 // Reads the controllers: returns move/jump/sprint input for VR
+const vrOut = { fx: 0, sx: 0, jump: false, sprint: false };
 function readVR(dt) {
-  const out = { fx: 0, sx: 0, jump: false, sprint: false };
+  const out = vrOut;
+  out.fx = 0; out.sx = 0; out.jump = false; out.sprint = false;
   for (const c of controllers) {
     const src = c.userData.input, pad = src?.gamepad;
     if (!pad) continue;
     const ax = stickDeadZone(pad.axes, src.handedness);
     if (src.handedness === 'left' && ax.length >= 4) {
       out.sx = ax[2]; out.fx = -ax[3];
-      const x = !!pad.buttons[4]?.pressed;
       const over = (state === 'caught' || state === 'escaped') && stateT > 1.2;
       if (over && pad.buttons[5]?.pressed) goToArcade();
     }
@@ -854,10 +1336,12 @@ function rotateRigAroundHead(angle) { rig.rotation.y += angle; }
 
 // ---------- Main loop ----------
 const clock = new THREE.Clock();
-const fwd = new THREE.Vector3(), right = new THREE.Vector3();
+const fwd = new THREE.Vector3(), right = new THREE.Vector3(), wish = new THREE.Vector3(), kdir = new THREE.Vector3();
 let hudTimer = 0, msgShownFor = '';
+const DEBUG = location.search.includes('debug');
+let dbgFreeze = false, dbgNoRender = false;
 
-renderer.setAnimationLoop(() => {
+function frame() {
   vrPauseButtons();
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
@@ -873,6 +1357,8 @@ renderer.setAnimationLoop(() => {
     p.userData.life -= dt;
     if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
   }
+  if (LV.liquid === 'lava' && liquidMat) liquidMat.color.setHSL(0.045, 1, 0.5 + Math.sin(t * 2.5) * 0.06);   // glowing lava
+  updateWeather(dt, t);
 
   const vr = inVR ? readVR(dt) : null;
 
@@ -883,11 +1369,13 @@ renderer.setAnimationLoop(() => {
   } else if (!paused) {
     stateT += dt;
 
+    // Level name and what's new, then the countdown
+    if (state === 'levelIntro' && stateT >= introDur) { state = 'countdown'; stateT = 0; }
     // Countdown: 3, 2, 1, RUN!
     if (state === 'countdown') {
       const n = 3 - Math.floor(stateT);
       const label = n > 0 ? String(n) : 'RUN!';
-      if (label !== msgShownFor) { showMessage(label, n > 0 ? 'the King is waking up...' : '', n > 0 ? '#ffffff' : '#ffc830'); beep(n > 0 ? 440 : 880, 0.2); msgShownFor = label; }
+      if (label !== msgShownFor) { showMessage(label, n > 0 ? `level ${level} · the King is waking up...` : '', n > 0 ? '#ffffff' : '#ffc830'); beep(n > 0 ? 440 : 880, 0.2); msgShownFor = label; }
       if (stateT >= 3) { state = 'run'; stateT = 0; }
     }
     if (state === 'run') {
@@ -917,12 +1405,14 @@ renderer.setAnimationLoop(() => {
     if (inVR) { camera.getWorldDirection(tmpV); yaw = Math.atan2(-tmpV.x, -tmpV.z); }
     fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
     right.set(Math.cos(yaw), 0, -Math.sin(yaw));
-    const wish = new THREE.Vector3().addScaledVector(fwd, fx).addScaledVector(right, sx);
+    wish.set(0, 0, 0).addScaledVector(fwd, fx).addScaledVector(right, sx);
     if (wish.lengthSq() > 1) wish.normalize();
     let speed = WALK_SPEED;
-    const inWater = inRavine(Math.floor(player.pos.z)) && player.pos.y < 2;
-    if (inWater) speed *= 0.6;
-    const accel = player.onGround ? 14 : 4;
+    const inLiquid = inRavine(Math.floor(player.pos.z)) && player.pos.y < 2;
+    if (inLiquid) speed *= LIQUIDS[LV.liquid].slow;
+    // Ice is slippery: you speed up, slow down and turn slowly on it
+    const onIce = player.onGround && get(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.05), Math.floor(player.pos.z)) === ICE;
+    const accel = player.onGround ? (onIce ? 2 : 14) : 4;
     const k = Math.min(1, accel * dt);
     player.vel.x += (wish.x * speed - player.vel.x) * k;
     player.vel.z += (wish.z * speed - player.vel.z) * k;
@@ -946,53 +1436,80 @@ renderer.setAnimationLoop(() => {
       player.walkPhase += dt * hspeed * 2.2;
       if (before < 0 && Math.sin(player.walkPhase) >= 0) noise(0.06, 'bandpass', 600 + Math.random() * 300, 0.08);
     }
+    // Leave footprints for the King to follow
+    if (state === 'run') {
+      const n = trailX.length - 1;
+      if (Math.hypot(player.pos.x - trailX[n], player.pos.z - trailZ[n]) > 0.8) { trailX.push(player.pos.x); trailZ.push(player.pos.z); }
+    }
 
     // ----- The King -----
-    if (state === 'countdown' || (state === 'run' && runT < KING_HEAD_START)) {
+    const kc = LV.king;
+    let danger = 0;
+    if (state === 'countdown' || (state === 'run' && runT < kc.headStart)) {
       // Climbing out of the ground
       const goal = colH(Math.floor(kingState.pos.x), Math.floor(kingState.pos.z));
       if (state === 'run' || stateT > 1) kingState.pos.y = Math.min(goal, kingState.pos.y + dt * 2.2);
-      if (Math.random() < dt * 10) burst(new THREE.Vector3(kingState.pos.x, goal + 0.2, kingState.pos.z), 0x7a5434, 2, 3);
-      if (state === 'run' && runT >= KING_HEAD_START - dt && !kingState.active) { kingState.active = true; roar(); }
+      if (Math.random() < dt * 10) burst(tmpV.set(kingState.pos.x, goal + 0.2, kingState.pos.z), 0x7a5434, 2, 3);
+      if (state === 'run' && runT >= kc.headStart - dt && !kingState.active) { kingState.active = true; roar(); }
     } else if (state === 'run') {
-      const ks = Math.min(KING_MAX_SPEED, KING_START_SPEED + KING_SPEEDUP * runT);
-      const dir = new THREE.Vector3(player.pos.x - kingState.pos.x, 0, player.pos.z - kingState.pos.z);
-      const dist = dir.length();
-      dir.normalize();
-      kingState.pos.x += dir.x * ks * dt;
-      kingState.pos.z += dir.z * ks * dt;
+      const ks = Math.min(kc.max, kc.speed + kc.speedup * runT);
+      const kp = kingState.pos;
+      // Where is he heading? Straight at you if he can see you, otherwise along your footprints
+      let tx = player.pos.x, tz = player.pos.z;
+      if (WALLS.length) {
+        if (clearLine(kp.x, kp.z, tx, tz)) trailIdx = trailX.length - 1;
+        else {
+          if (Math.hypot(trailX[trailIdx] - kp.x, trailZ[trailIdx] - kp.z) < 0.4 && trailIdx < trailX.length - 1) trailIdx++;
+          while (trailIdx < trailX.length - 1 && clearLine(kp.x, kp.z, trailX[trailIdx + 1], trailZ[trailIdx + 1])) trailIdx++;
+          tx = trailX[trailIdx]; tz = trailZ[trailIdx];
+        }
+      }
+      const dist = Math.hypot(player.pos.x - kp.x, player.pos.z - kp.z);
+      kdir.set(tx - kp.x, 0, tz - kp.z);
+      const tlen = kdir.length();
+      if (tlen > 0.001) kdir.multiplyScalar(1 / tlen);
+      const move = Math.min(ks * dt, tlen);
+      kp.x += kdir.x * move;
+      kp.z += kdir.z * move;
       // Climb terrain (he's big enough to step up anything), fall into dips
       let ground = 0;
       for (const ox of [-0.5, 0.5]) for (const oz of [-0.5, 0.5]) {
-        const cx = Math.floor(kingState.pos.x + ox), cz = Math.floor(kingState.pos.z + oz);
-        if (colH(cx, cz) < 13) ground = Math.max(ground, colH(cx, cz));
+        const cx = Math.floor(kp.x + ox), cz = Math.floor(kp.z + oz);
+        if (colH(cx, cz) < WALL_H) ground = Math.max(ground, colH(cx, cz));
       }
-      if (kingState.pos.y < ground) { kingState.pos.y = Math.min(ground, kingState.pos.y + 7 * dt); kingState.vy = 0; }
-      else { kingState.vy -= GRAVITY * dt; kingState.pos.y = Math.max(ground, kingState.pos.y + kingState.vy * dt); if (kingState.pos.y === ground) kingState.vy = 0; }
+      if (kp.y < ground) { kp.y = Math.min(ground, kp.y + 7 * dt); kingState.vy = 0; }
+      else { kingState.vy -= GRAVITY * dt; kp.y = Math.max(ground, kp.y + kingState.vy * dt); if (kp.y === ground) kingState.vy = 0; }
       // Smash through trees
-      for (let x = Math.floor(kingState.pos.x - 0.7); x <= Math.floor(kingState.pos.x + 0.7); x++)
-        for (let y = Math.floor(kingState.pos.y); y <= Math.floor(kingState.pos.y + 3.3); y++)
-          for (let z = Math.floor(kingState.pos.z - 0.7); z <= Math.floor(kingState.pos.z + 0.7); z++) {
+      for (let x = Math.floor(kp.x - 0.7); x <= Math.floor(kp.x + 0.7); x++)
+        for (let y = Math.floor(kp.y); y <= Math.floor(kp.y + 3.3); y++)
+          for (let z = Math.floor(kp.z - 0.7); z <= Math.floor(kp.z + 0.7); z++) {
             const b = get(x, y, z);
             if (b === LOG || b === LEAVES) smashBlock(x, y, z);
           }
-      king.rotation.y = Math.atan2(dir.x, dir.z);
+      if (tlen > 0.001) king.rotation.y = Math.atan2(kdir.x, kdir.z);
       // Stomping animation and sound
       const before = Math.sin(kingState.phase);
       kingState.phase += dt * ks * 1.6;
       if (before < 0 !== Math.sin(kingState.phase) < 0) noise(0.15, 'lowpass', 160, Math.min(0.5, 4 / (dist + 1)));
       if (Math.random() < dt * 0.15) roar();
       // Caught!
-      if (dist < 1.1 && Math.abs(player.pos.y - kingState.pos.y) < 3) endGame(false);
+      if (dist < 1.1 && Math.abs(player.pos.y - kp.y) < 3) endGame(false);
       // Danger effects
-      const danger = THREE.MathUtils.clamp(1 - (dist - 2) / 8, 0, 1);
-      $('danger').style.opacity = (danger * 0.6).toFixed(2);
+      danger = THREE.MathUtils.clamp(1 - (dist - 2) / 8, 0, 1);
       heartbeatT -= dt;
       if (dist < 10 && heartbeatT <= 0) { beep(60, 0.12, 'sine', 0.35); setTimeout(() => beep(55, 0.12, 'sine', 0.25), 160); heartbeatT = 0.4 + dist * 0.08; }
     }
+    // Zombie guards
+    if (guardCount) {
+      const gd = updateGuards(dt);
+      if (state === 'run') danger = Math.max(danger, THREE.MathUtils.clamp(1 - (gd - 1) / 5, 0, 1) * 0.8);
+    }
+    // Fell in the lava?
+    if (state === 'run' && LIQUIDS[LV.liquid].deadly && inRavine(Math.floor(player.pos.z)) && player.pos.y < 3.5) endGame(false, 'lava');
     // Made it to the dance floor?
     if (state === 'run' && player.pos.z >= FINISH_Z) endGame(true);
-    if (state !== 'run') $('danger').style.opacity = state === 'caught' ? '0.6' : '0';
+    if (state === 'run') $('danger').style.opacity = (danger * 0.6).toFixed(2);
+    else $('danger').style.opacity = state === 'caught' ? '0.6' : '0';
   }
 
   // King pose
@@ -1023,6 +1540,9 @@ renderer.setAnimationLoop(() => {
     arm.rotation.x = 0.2 + Math.sin(player.walkPhase) * 0.15;
     if (state === 'caught' && stateT < 0.6) camera.position.x += (Math.random() - 0.5) * 0.15;   // shake
   }
+  // Sky and sun travel with you
+  sky.position.set(player.pos.x, 0, player.pos.z);
+  sun.position.set(W / 2, sunY, player.pos.z + 120);
 
   // HUD
   hudTimer -= dt;
@@ -1040,24 +1560,48 @@ renderer.setAnimationLoop(() => {
       g.clearRect(0, 0, 512, 64);
       g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, 0, 512, 64);
       g.font = '18px "Press Start 2P", monospace'; g.textBaseline = 'middle';
-      g.fillStyle = '#ffc830'; g.fillText(Math.round(pct * 100) + '%', 12, 33);
-      g.fillStyle = kingState.active && kd < 8 ? '#ff3d3d' : '#ffffff'; g.fillText(kingText.replace(' IS WAKING UP...', ' WAKING...'), 110, 33);
+      g.fillStyle = '#ffc830'; g.fillText('L' + level, 12, 33); g.fillText(Math.round(pct * 100) + '%', 70, 33);
+      g.fillStyle = kingState.active && kd < 8 ? '#ff3d3d' : '#ffffff'; g.fillText(!kingState.active ? 'KING WAKING...' : `KING ${kd} BEHIND`, 170, 33);
       vrHudTex.needsUpdate = true;
     }
   }
   pauseSign.visible = paused && inVR;
 
-  renderer.render(scene, camera);
-});
+  if (!dbgNoRender) renderer.render(scene, camera);
+}
 
+// Show the highest level you've unlocked behind the start menu
+loadLevel(progress.unlocked);
 resetWorld();
 player.pos.set(W / 2, 6, START_Z);
+refreshLevelPicker();
+renderer.setAnimationLoop(() => { if (!dbgFreeze) frame(); });
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+
+// Testing helpers, only when the page address ends in ?debug
+if (DEBUG) {
+  window.__dbg = {
+    get state() { return state; }, get level() { return level; }, get runT() { return runT; }, get paused() { return paused; },
+    get L() { return L; }, get FINISH_Z() { return FINISH_Z; }, get RAVINES() { return RAVINES; }, get WALLS() { return WALLS; },
+    get LV() { return LV; }, get endReason() { return endReason; }, get guardCount() { return guardCount; }, get progress() { return progress; },
+    player, kingState, guards, keys, LEVELS, colH, get, isSolid, inRavine, ICE,
+    startLevel, startGame, continueAfterEnd, showLevelMenu, setPaused, refreshLevelPicker,
+    set freeze(v) { dbgFreeze = v; }, set noRender(v) { dbgNoRender = v; },
+    render() { renderer.render(scene, camera); },
+    // Run n frames with a fixed time step; hook() runs before each frame (for a test autopilot)
+    step(n, dt = 1 / 60, hook) {
+      const orig = clock.getDelta;
+      clock.getDelta = () => { clock.elapsedTime += dt; return dt; };
+      try { for (let i = 0; i < n; i++) { if (hook && hook() === false) break; frame(); } } finally { clock.getDelta = orig; }
+      return state;
+    },
+  };
+}
 </script>
 </body>
 </html>
