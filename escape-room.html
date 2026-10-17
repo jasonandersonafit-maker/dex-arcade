@@ -2492,11 +2492,11 @@ function lvlClockTower() {
   const chest = makeChest(); at(chest.g, 0.2, -0.3); solid(chest.g);
   const pl = makePadlock(chest.g, chest.lockPos, { code: () => combo, onOpen: () => { flags[chest.flag] = true; sfx.creak(); toast('The padlock falls open and the chest lid creaks up.'); } });
   inspect(chest.lid, 'Open the chest', () => pl.done ? 'It is open.' : 'Locked with a 3-number padlock.');
-  noteOn(chest.inside, 0, 0.002, 0, 0.1, cardTex('OFFICE TELEPHONE', phone, 'call me if you get stuck'), { w: 0.18, h: 0.11, flag: 'readCard', label: 'Read the card' });
+  noteOn(chest.inside, 0, 0.002, 0, 0.1, cardTex('OFFICE TELEPHONE', phone, 'call me if you get stuck'), { w: 0.26, h: 0.16, flag: 'readCard', label: 'Read the card' });
   const desk = makeDesk({ drawer: false }); onWall(desk.g, 'S', -0.9, 0, 0.38); solid(desk.g);
   noteOn(desk.g, -0.12, desk.top + 0.008, 0.06, 0.15, noteTex(['My chest only opens at the right hours.', 'Read my three stopped clocks in order: clock 1, clock 2, clock 3.', 'Only the hours matter.']), { flag: 'readNote' });
   const ph = makePhone(); ph.g.position.set(0.25, desk.top, 0.0); desk.g.add(ph.g);
-  const pkp = makeKeypad(ph.g, V3(0, 0.083, 0.05), 0, {
+  const pkp = makeKeypad(ph.g, V3(0, 0.112, 0.045), 0, {   // high enough that the bottom row isn't buried in the phone
     powered: () => true, code: () => phone, deadMsg: '', okText: 'RING', plate: std({ color: 0x141414, roughness: 0.3 }),
     onOpen: () => { flags.called = true; sfx.ring(); later(() => toast(`"Hello? Ashford here. Clever of you to call! The exit code is ${code.split('').join('-')}. Good luck, my friend." *click*`, 14), 2600); },
   });
