@@ -1014,18 +1014,35 @@ function setPrompt(text) {
 const readerPlane = new THREE.Mesh(P(1, 1), new THREE.MeshBasicMaterial({ depthTest: false, toneMapped: false }));
 readerPlane.position.set(0, -0.02, -0.55); readerPlane.renderOrder = 1002; readerPlane.visible = false;
 camera.add(readerPlane);
-let reading = false;
-function openReader(tex) {
+let reading = false, readerAlt = null;
+// alt: a second page to show on the next click (the backwards note seen in a mirror)
+function openReader(tex, alt = null) {
   reading = true; sfx.paper();
+  readerAlt = alt;
+  showReaderPage(tex, alt ? 'CLICK (OR PRESS E) TO HOLD IT UP TO A MIRROR' : 'CLICK OR PRESS E TO PUT IT DOWN');
+  if (alt && renderer.xr.isPresenting) toast('It is written backwards! Pull the trigger to hold it up to a mirror.', 5);
+}
+function showReaderPage(tex, caption) {
   const c = tex.userData.canvas;
   $('readerImg').src = c.toDataURL();
+  $('reader').querySelector('p').textContent = caption;
   $('reader').hidden = renderer.xr.isPresenting;
   readerPlane.material.map = tex; readerPlane.material.needsUpdate = true;
   const hgt = c.height >= c.width ? 0.48 : 0.3;
   readerPlane.scale.set(hgt * c.width / c.height, hgt, 1);
   readerPlane.visible = renderer.xr.isPresenting;
 }
-function closeReader() { reading = false; $('reader').hidden = true; readerPlane.visible = false; sfx.paper(); }
+// Clicking while reading: flip to the mirror view if there is one, otherwise put the note down
+function readerClick() {
+  if (readerAlt) {
+    const a = readerAlt; readerAlt = null;
+    sfx.paper(); showReaderPage(a, 'IN THE MIRROR IT SAYS... · CLICK OR PRESS E TO PUT IT DOWN');
+    if (renderer.xr.isPresenting) toast('In the mirror the note reads the right way round!', 4);
+    return;
+  }
+  closeReader();
+}
+function closeReader() { reading = false; readerAlt = null; $('reader').hidden = true; readerPlane.visible = false; sfx.paper(); }
 
 // ---------- Paper things you can read ----------
 function agedPaper(g, w, h, base = '#ebdfc2') {
@@ -1040,16 +1057,16 @@ function agedPaper(g, w, h, base = '#ebdfc2') {
   vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(110,70,20,0.35)');
   g.fillStyle = vig; g.fillRect(0, 0, w, h);
 }
-function drawNote(lines, signature, { mirror = false } = {}) {
+function drawNote(lines, signature, { mirror = false, big = false } = {}) {
   return (g, w, h) => {
     agedPaper(g, w, h);
     g.strokeStyle = 'rgba(120,90,50,0.2)'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, h * 0.5); g.lineTo(w, h * 0.5 + 6); g.stroke();
     if (mirror) { g.translate(w, 0); g.scale(-1, 1); }
     g.fillStyle = '#2a2238'; g.textBaseline = 'alphabetic'; g.textAlign = 'left';
-    g.font = '56px Caveat, "Segoe Print", cursive';
-    let y = 130;
+    g.font = big ? 'bold 58px Georgia, "Times New Roman", serif' : '56px Caveat, "Segoe Print", cursive';   // big = clear print letters
+    let y = big ? 150 : 130;
     for (const line of lines) {
-      for (const l of wrapText(g, line, w - 130)) { g.fillText(l, 64, y); y += 66; }
+      for (const l of wrapText(g, line, w - 130)) { g.fillText(l, 64, y); y += big ? 78 : 66; }
       y += line ? 22 : 0;
     }
     if (signature) { g.font = '60px Caveat, "Segoe Print", cursive'; g.textAlign = 'right'; g.fillText(signature, w - 60, Math.max(y + 40, h - 90)); }
@@ -1099,10 +1116,10 @@ function plaqueTex(lines, w = 512, h = 192) {
   return t;
 }
 // Lying flat on something
-function noteOn(parent, x, y, z, rotZ, tex, { w = 0.21, h = 0.28, flag, label = 'Read the note' } = {}) {
+function noteOn(parent, x, y, z, rotZ, tex, { w = 0.21, h = 0.28, flag, label = 'Read the note', alt = null } = {}) {
   const m = add(parent, P(w, h), std({ map: tex, roughness: 0.9 }), x, y, z, { cast: false });
   m.rotation.set(-Math.PI / 2, 0, rotZ);
-  interact(m, () => label, () => { if (flag) flags[flag] = true; openReader(tex); });
+  interact(m, () => label, () => { if (flag) flags[flag] = true; openReader(tex, alt); });
   return m;
 }
 // Pinned or hanging upright
@@ -2566,7 +2583,9 @@ function lvlCellar() {
   makeLevers('S', 0.6, 1.25, { pattern: () => pattern, onOpen: () => { flags.rackOpen = true; sfx.rumble(); toast('GRRRIND... the wine rack on the back wall swings away from the wall!'); } });
   // The backwards note
   const b2 = makeBarrel(); at(b2, 1.9, -0.8); solid(b2);
-  noteOn(b2, 0, 0.82, 0, 0.3, noteTex(['To open my secret wine rack, set the levers:', pattern.map(u => u ? 'UP' : 'DOWN').join(', '), 'Lever 1 is on the left.'], '- A.', { mirror: true }), { flag: 'readNote', label: 'Read the strange note' });
+  const lv = pattern.map((u, i) => `${i + 1}: ${u ? 'UP' : 'DOWN'}`);
+  const leverLines = ['To open my secret wine rack, set the levers:', `${lv[0]}    ${lv[1]}`, `${lv[2]}    ${lv[3]}`, 'Lever 1 is on the left.'];
+  noteOn(b2, 0, 0.82, 0, 0.3, noteTex(leverLines, '- A.', { mirror: true, big: true }), { flag: 'readNote', label: 'Read the strange note', alt: noteTex(leverLines, '- A.', { big: true }) });
   // A crate of old bottles
   const crate = new THREE.Group(); at(crate, -1.9, -0.3, 0.4); const cw = wood('pine', 0.85);
   add(crate, B(0.6, 0.02, 0.45), cw, 0, 0.01, 0);
@@ -2595,7 +2614,7 @@ function lvlCellar() {
     intro: "LEVEL 9: The Wine Cellar. It's very dark down here... is that a lantern?",
     hints: () => !flags.got_lantern ? ['Take the glowing lantern from the barrel next to you.']
       : !flags.readNote ? ['Find the note lying on the barrel in the middle of the cellar.']
-      : !flags.rackOpen ? ['The note is written backwards, like in a mirror. Read it from right to left.', `Set the levers on the wall: ${pattern.map((u, i) => `${i + 1} ${u ? 'UP' : 'DOWN'}`).join(', ')}.`]
+      : !flags.rackOpen ? ['The note is written backwards. While reading it, click again (or press E) to hold it up to a mirror.', `Set the levers on the wall: ${pattern.map((u, i) => `${i + 1} ${u ? 'UP' : 'DOWN'}`).join(', ')}.`]
       : !flags.got_fuse ? ['Take the fuse from the secret niche behind the wine rack.']
       : !flags.fuseIn ? ['Put the fuse in the gray fuse box near the door.']
       : !flags.readCrate ? ['Read the note on the crate of old wine bottles.']
@@ -2900,7 +2919,7 @@ function exitZoom(relock) {
 }
 function useThing(h = hot) {
   if (state !== 'play' || paused) return;
-  if (reading) { closeReader(); return; }
+  if (reading) { readerClick(); return; }
   if (!h) return;
   const lk = !renderer.xr.isPresenting && !zoom.active && lockOf(h);
   if (lk && !lk.isDone()) { enterZoom(lk); return; }   // first click zooms in, then you press the buttons
@@ -2918,7 +2937,7 @@ renderer.domElement.addEventListener('mousedown', e => {
   if (!locked && !freeLook) { lockMouse(); return; }
   useThing();
 });
-$('reader').addEventListener('mousedown', () => { if (reading) closeReader(); });
+$('reader').addEventListener('mousedown', () => { if (reading) readerClick(); });
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
