@@ -670,9 +670,9 @@ function drawClockFace(g, w, h) {
     g.lineWidth = i % 5 ? 2 : 5;
     g.beginPath(); g.moveTo(c + Math.sin(a) * r1, c - Math.cos(a) * r1); g.lineTo(c + Math.sin(a) * r2, c - Math.cos(a) * r2); g.stroke();
   }
-  const roman = ['XII', 'I', 'II', 'III', 'IIII', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
-  g.fillStyle = '#1a140e'; g.font = 'bold 46px Georgia, "Times New Roman", serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  roman.forEach((n, i) => { const a = i / 12 * Math.PI * 2, r = c - 92; g.fillText(n, c + Math.sin(a) * r, c - Math.cos(a) * r); });
+  // Plain numbers 1-12 (easier to read than Roman numerals)
+  g.fillStyle = '#1a140e'; g.font = 'bold 60px Georgia, "Times New Roman", serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2, r = c - 90; g.fillText(String(i || 12), c + Math.sin(a) * r, c - Math.cos(a) * r + 3); }
   g.font = 'italic 22px Georgia, serif'; g.fillText('Ashford & Sons', c, c + 70);
   g.font = '16px Georgia, serif'; g.fillText('LONDON', c, c + 96);
   noiseDots(g, w, h, 2500, 0.06, 0, 3);
@@ -1449,7 +1449,7 @@ function makeClock({ label = null, ticking = false, size = 1 } = {}) {
   second.rotation.z = -2.6;
   add(g, CYL(0.012, 0.012, 0.012, 16), M.brass, 0, 0, 0.074).rotation.x = Math.PI / 2;
   add(g, new THREE.CircleGeometry(0.235, 48), std({ color: 0xffffff, transparent: true, opacity: 0.08, roughness: 0.02, envMapIntensity: 1.5, depthWrite: false }), 0, 0, 0.08, { cast: false, receive: false });
-  if (label) plaque(g, 0, -0.34, 0, [label], { w: 0.12, h: 0.06, label: 'Read the little plaque' });
+  if (label) plaque(g, 0, -0.34, 0, [label], { w: 0.2, h: 0.06, label: 'Read the little plaque' });
   if (ticking) { let acc = 0; updaters.push(dt => { acc += dt; if (acc >= 1) { acc -= 1; second.rotation.z -= Math.PI / 30; } }); }
   return { g, setTime(h, m) { hour.rotation.z = -((h % 12) + m / 60) / 12 * Math.PI * 2; minute.rotation.z = -(m / 60) * Math.PI * 2; } };
 }
@@ -2170,7 +2170,7 @@ function lvlStudy() {
   uvMark('N', 0.75, 1.55, 0.3, 0.16, 256, 140, inkText('look closer →', '#c8fff0', '#7affd8', 52));
   const desk = makeDesk(); onWall(desk.g, 'S', -1.2, 0, 0.38); solid(desk.g);
   const bl = makeBankerLamp(); bl.position.set(0.48, desk.top, -0.12); desk.g.add(bl);
-  noteOn(desk.g, -0.12, desk.top + 0.004, 0.05, 0.25, noteTex(['If you are reading this, I am sorry.', 'You are locked in my study until you prove you are clever enough to leave.', 'I always keep the drawer key where my guests wipe their feet.']), { flag: 'readNote1' });
+  noteOn(desk.g, -0.12, desk.top + 0.008, 0.05, 0.25, noteTex(['If you are reading this, I am sorry.', 'You are locked in my study until you prove you are clever enough to leave.', 'I always keep the drawer key where my guests wipe their feet.']), { flag: 'readNote1' });
   lockedBy(desk.drawer.meshes, { flag: desk.drawer.flag, item: 'key', verb: 'Open the drawer', lockedMsg: "It's locked. There's a small brass keyhole above the knob.", onOpen: () => later(sfx.drawer, 150), openMsg: 'The key turns with a click and the drawer slides open.' });
   const torch = makeTorch(); torch.position.set(-0.1, 0.022, 0.05); torch.rotation.set(0, 0.6, Math.PI / 2); desk.drawer.inside.add(torch);
   takeable(torch, 'uv', `You got a UV flashlight! ${renderer.xr.isPresenting ? 'Press A' : 'Press F'} to switch it on and off.`);
@@ -2306,7 +2306,7 @@ function lvlDining() {
   moveWhen(head.cushion, 'cushion', { dx: 0.4, dy: -0.06, rz: -0.55 });   // slides off the side of the seat
   const key = makeKey(); key.position.set(0, 0.49, 0.03); key.scale.setScalar(1.4); key.rotation.y = 0.6; head.g.add(key);   // on top of the wooden seat, under the cushion
   takeable(key, 'key', 'You found a small brass key under the cushion!');
-  noteOn(table, -0.6, 0.772, 0.35, 0.3, noteTex(['Dinner is served... in the dark.', 'Some secrets in this room only shine when the lights are out.', 'The switch is by the door.']), { flag: 'readNote' });
+  noteOn(table, -0.6, 0.776, 0.35, 0.3, noteTex(['Dinner is served... in the dark.', 'Some secrets in this room only shine when the lights are out.', 'The switch is by the door.']), { flag: 'readNote' });
   makeLightSwitch('E', -0.78, 1.25);
   glowMark('N', -0.3, 2.05, 2.0, 0.3, 1024, 150, glowText('The key is under the cushion of the head chair, at the end of the table far from the door'));
   glowMark('S', -0.3, 2.05, 2.2, 0.3, 1024, 150, glowText('Count the candles in the order I, II, III, IV'));
@@ -2436,7 +2436,7 @@ function lvlLab() {
   inspect(scope, 'Look in the microscope', 'Tiny wiggly things. They do not know the code either.');
   const wall = makeLabBench(2.4, 0.65); onWall(wall.g, 'N', -0.6, 0, 0.33); solid(wall.g);
   for (let i = 0; i < 6; i++) { const b = makeBeaker(pick1([0x88aa88, 0xaa8866, 0x8888aa]), 0.1 + rnd() * 0.08, 0.03 + rnd() * 0.02); b.position.set(-1.0 + i * 0.35, wall.top, -0.1 + rnd() * 0.1); wall.g.add(b); }
-  noteOn(wall.g, 0.3, wall.top + 0.002, 0.05, -0.2, noteTex(['Lab notes, day 412:', 'I lost my keys AGAIN. I think I left them in my lab coat.', 'Remember: the exit code is written in invisible ink. Only my UV lamp can read it.'], '- Prof. A.'), { flag: 'readNote' });
+  noteOn(wall.g, 0.3, wall.top + 0.006, 0.05, -0.2, noteTex(['Lab notes, day 412:', 'I lost my keys AGAIN. I think I left them in my lab coat.', 'Remember: the exit code is written in invisible ink. Only my UV lamp can read it.'], '- Prof. A.'), { flag: 'readNote' });
   // Whiteboard
   const wb = new THREE.Group(); onWall(wb, 'N', -0.6, 1.75, 0);
   const wbTex = canvasTex(1024, 512, (g, w, h) => {
@@ -2486,7 +2486,7 @@ function lvlClockTower() {
   const combo = hours.join('');
   const phone = String(2 + Math.floor(rnd() * 8)) + randDigits(3);
   const code = randDigits(4);
-  hours.forEach((h, i) => { const c = makeClock({ label: ROMAN[i + 1], size: 0.85 }); onWall(c.g, 'N', -1.5 + i * 1.5, 1.85); c.setTime(h, 0); inspect(c.g, `Look at clock ${ROMAN[i + 1]}`, 'This clock has stopped, exactly on the hour.'); });
+  hours.forEach((h, i) => { const c = makeClock({ label: `CLOCK ${i + 1}`, size: 0.85 }); onWall(c.g, 'N', -1.5 + i * 1.5, 1.85); c.setTime(h, 0); inspect(c.g, `Look at clock ${i + 1}`, 'This clock has stopped, exactly on the hour.'); });
   const gf = makeGrandfatherClock(); onWall(gf, 'W', -1.4); solid(gf);
   inspect(gf, 'Look at the grandfather clock', 'Tick... tock... This is the only clock that still works.');
   const chest = makeChest(); at(chest.g, 0.2, -0.3); solid(chest.g);
@@ -2494,7 +2494,7 @@ function lvlClockTower() {
   inspect(chest.lid, 'Open the chest', () => pl.done ? 'It is open.' : 'Locked with a 3-number padlock.');
   noteOn(chest.inside, 0, 0.002, 0, 0.1, cardTex('OFFICE TELEPHONE', phone, 'call me if you get stuck'), { w: 0.18, h: 0.11, flag: 'readCard', label: 'Read the card' });
   const desk = makeDesk({ drawer: false }); onWall(desk.g, 'S', -0.9, 0, 0.38); solid(desk.g);
-  noteOn(desk.g, -0.35, desk.top + 0.003, 0.05, 0.2, noteTex(['My chest only opens at the right hours.', 'Read my three stopped clocks in order: I, II, III.', 'Only the hours matter.']), { flag: 'readNote' });
+  noteOn(desk.g, -0.12, desk.top + 0.008, 0.06, 0.15, noteTex(['My chest only opens at the right hours.', 'Read my three stopped clocks in order: clock 1, clock 2, clock 3.', 'Only the hours matter.']), { flag: 'readNote' });
   const ph = makePhone(); ph.g.position.set(0.25, desk.top, 0.0); desk.g.add(ph.g);
   const pkp = makeKeypad(ph.g, V3(0, 0.083, 0.05), 0, {
     powered: () => true, code: () => phone, deadMsg: '', okText: 'RING', plate: std({ color: 0x141414, roughness: 0.3 }),
@@ -2503,7 +2503,7 @@ function lvlClockTower() {
   pkp.group.rotation.x = -1.2; pkp.group.scale.setScalar(0.8);
   inspect(ph.handset, 'Pick up the phone', () => flags.called ? `You remember the voice: "The exit code is ${code.split('').join('-')}."` : 'A dial tone. You need a number to call - type it on the buttons.');
   const bl = makeBankerLamp(); bl.position.set(-0.55, desk.top, -0.15); desk.g.add(bl);
-  const chair = makeChair(); at(chair.g, -0.9, 1.6, Math.PI); solid(chair.g);
+  const chair = makeChair(); at(chair.g, -0.15, 1.45, Math.PI + 0.7); solid(chair.g);   // pulled out to the side so it doesn't hide the note
   // Big gears on the walls
   for (const [side, a, y, r, sp] of [['E', -1.6, 1.8, 0.4, 0.3], ['E', -1.9, 1.15, 0.25, -0.48], ['S', 1.5, 1.9, 0.5, 0.2]]) {
     const gear = new THREE.Group(); onWall(gear, side, a, y, 0.06);
@@ -2522,7 +2522,7 @@ function lvlClockTower() {
     start: { x: 1.2, z: 1.0, yaw: 0.6 },
     intro: 'LEVEL 8: The Clock Tower. Tick... tock... time is running.',
     hints: () => !flags.readNote ? ['Read the note on the desk.']
-      : !pl.done ? ['Look at the three stopped clocks on the wall, labeled I, II and III. What hour does each show?', `Clock I shows ${hours[0]}, clock II shows ${hours[1]}, clock III shows ${hours[2]}. Turn the padlock dials to ${combo}.`]
+      : !pl.done ? ['Look at the three stopped clocks on the wall, labeled CLOCK 1, CLOCK 2 and CLOCK 3. What hour does each show?', `Clock 1 shows ${hours[0]}, clock 2 shows ${hours[1]}, clock 3 shows ${hours[2]}. Turn the padlock dials to ${combo}.`]
       : !flags.readCard ? ['Read the card inside the open chest.']
       : !flags.called ? ['Call the number on the card using the telephone on the desk.', `Type ${phone} on the telephone buttons.`]
       : [`The Professor told you the code on the phone: ${code}. Type it on the door keypad.`],
@@ -2614,7 +2614,7 @@ function lvlVault() {
   const code = order.map(c => nums[c]).join('');
   makeRug(0.1, 0.0, 2.6, 1.8, 'gold');
   const desk = makeDesk({ drawer: false, woodName: 'ebony' }); at(desk.g, 0.2, 0.9, 0); solid(desk.g);
-  noteOn(desk.g, 0.1, desk.top + 0.003, 0.05, 0.1, noteTex(['So, you made it to my vault.', 'This is my greatest lock. Everything you learned in my house will get you out:', 'clocks, safes, invisible ink, levers, fuses and books.', 'I am very proud of you.']), { flag: 'readNote' });
+  noteOn(desk.g, 0.1, desk.top + 0.008, 0.05, 0.1, noteTex(['So, you made it to my vault.', 'This is my greatest lock. Everything you learned in my house will get you out:', 'clocks, safes, invisible ink, levers, fuses and books.', 'I am very proud of you.']), { flag: 'readNote' });
   const bl = makeBankerLamp(); bl.position.set(-0.5, desk.top, -0.1); desk.g.add(bl);
   const chair = makeChair({ woodName: 'ebony', cushion: 0x5a4010 }); at(chair.g, 0.2, 1.55, Math.PI); solid(chair.g);
   const clock = makeClock(); onWall(clock.g, 'W', -1.4, 1.95); clock.setTime(clockH[0], clockH[1]);
