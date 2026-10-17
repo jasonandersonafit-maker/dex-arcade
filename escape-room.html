@@ -2589,19 +2589,38 @@ function lvlCellar() {
   // A crate of old bottles
   const crate = new THREE.Group(); at(crate, -1.9, -0.3, 0.4); const cw = wood('pine', 0.85);
   add(crate, B(0.6, 0.02, 0.45), cw, 0, 0.01, 0);
-  for (const s of [-1, 1]) { add(crate, B(0.6, 0.3, 0.02), cw, 0, 0.15, s * 0.215); add(crate, B(0.02, 0.3, 0.45), cw, s * 0.29, 0.15, 0); }
+  for (const s of [-1, 1]) { add(crate, B(0.6, 0.1, 0.02), cw, 0, 0.05, s * 0.215); add(crate, B(0.02, 0.1, 0.45), cw, s * 0.29, 0.05, 0); }   // low sides so the labels show
+  // E (or a click) on a bottle zooms in on the labels
+  const crateView = new THREE.Object3D(); crateView.position.set(-0.005, 0.22, 0); crateView.rotation.x = -0.35; crate.add(crateView);
   solid(crate);
   shuffle([...years]).forEach((y, i) => {
-    const bt = new THREE.Group(); bt.position.set(-0.2 + i * 0.13, 0.02, 0); crate.add(bt);
+    const bt = new THREE.Group(); bt.position.set(-0.2 + i * 0.13, 0.02, 0); bt.scale.setScalar(1.25); crate.add(bt);
     add(bt, CYL(0.035, 0.035, 0.24, 14), std({ color: 0x1a2a14, roughness: 0.12, envMapIntensity: 1.2 }), 0, 0.12, 0);
     add(bt, CYL(0.013, 0.02, 0.1, 10), std({ color: 0x1a2a14, roughness: 0.12 }), 0, 0.29, 0);
     add(bt, CYL(0.015, 0.015, 0.03, 10), std({ color: 0x6a1010, roughness: 0.5 }), 0, 0.35, 0);
-    const lbl = canvasTex(256, 128, (c, w, h) => { c.fillStyle = '#e8dcbc'; c.fillRect(0, 0, w, h); c.strokeStyle = '#6a4a20'; c.lineWidth = 6; c.strokeRect(6, 6, w - 12, h - 12); c.fillStyle = '#3a2410'; c.font = 'italic 26px Georgia'; c.textAlign = 'center'; c.fillText('Château Ashford', w / 2, 46); c.font = 'bold 50px Georgia'; c.fillText(String(y), w / 2, 102); });
-    add(bt, new THREE.CylinderGeometry(0.0355, 0.0355, 0.09, 14, 1, true, -0.9, 1.8), std({ map: lbl, roughness: 0.8 }), 0, 0.12, 0, { cast: false });
-    inspect(bt, 'Look at the wine bottle', `A dusty old bottle. The label says ${y}.`);
+    const lbl = canvasTex(384, 192, (c, w, h) => { c.fillStyle = '#f0e6c8'; c.fillRect(0, 0, w, h); c.strokeStyle = '#6a4a20'; c.lineWidth = 8; c.strokeRect(8, 8, w - 16, h - 16); c.fillStyle = '#2a1808'; c.font = 'italic 30px Georgia'; c.textAlign = 'center'; c.fillText('Château Ashford', w / 2, 52); c.font = 'bold 96px Georgia'; c.fillText(String(y), w / 2, 158); });
+    // big label that glows a little, so the year is easy to read in the dark
+    add(bt, new THREE.CylinderGeometry(0.0358, 0.0358, 0.11, 18, 1, true, -1.2, 2.4), std({ map: lbl, emissiveMap: lbl, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.8 }), 0, 0.165, 0, { cast: false });
+    interact(bt, () => 'Look at the wine bottle', () => toast(`A dusty old bottle. The label says ${y}.`, 6), { zoomTo: crateView });
   });
-  noteUp(crate, 0, 0.35, 0.226, noteTex(['The door code:', 'the LAST digit of each bottle\'s year,', 'from the OLDEST bottle to the NEWEST.']), { w: 0.18, h: 0.24, flag: 'readCrate', pin: false });
+  // The note about the bottles is pinned on the wall right above the crate
+  const crateNote = new THREE.Group(); onWall(crateNote, 'W', -0.3, 0, 0);
+  noteUp(crateNote, 0, 1.25, 0.004, noteTex(['The door code:', 'the LAST digit of each bottle\'s year,', 'from the OLDEST bottle to the NEWEST.'], '- A.', { big: true }), { w: 0.27, h: 0.36, flag: 'readCrate' });
+  // A candle burning on the corner of the crate lights up the bottles and the note
+  add(crate, CYL(0.04, 0.04, 0.008, 16), M.brass, 0.25, 0.104, -0.17);
+  add(crate, CYL(0.018, 0.018, 0.1, 12), M.wax, 0.25, 0.158, -0.17);
+  const cflame = add(crate, SPH(0.011, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffcc70 }), 0.25, 0.22, -0.17, { cast: false });
+  const cglow = glowSprite(0xffaa50, 0.14, 0.8); cglow.position.set(0.25, 0.225, -0.17); crate.add(cglow);
+  const crateLight = new THREE.PointLight(0xffb060, 1.8, 0, 2); crateLight.position.set(0.1, 0.75, 0.15); crate.add(crateLight);
+  updaters.push((dt, t) => { cflame.scale.y = 1.7 + Math.sin(t * 13) * 0.25; crateLight.intensity = 1.7 + Math.sin(t * 9) * 0.1 + Math.sin(t * 23) * 0.06; });
   makeFuseBox('E', -1.4, 1.45);
+  // An old lantern on the wall by the door, so you can see the keypad
+  const sconce = new THREE.Group(); onWall(sconce, 'E', 1.35, 1.55, 0);
+  add(sconce, B(0.06, 0.12, 0.02), M.iron, 0, 0.1, 0.01);
+  add(sconce, B(0.02, 0.02, 0.16), M.iron, 0, 0.14, 0.08);
+  const wl = makeLanternModel(); wl.position.set(0, -0.08, 0.16); sconce.add(wl);
+  const wglow = glowSprite(0xffa040, 0.3, 0.7); wglow.position.set(0, 0.02, 0.16); sconce.add(wglow);
+  const doorLamp = new THREE.PointLight(0xffa850, 1.6, 0, 2); doorLamp.position.set(0, 0.05, 0.3); sconce.add(doorLamp);
   // cobwebs in the corners
   const web = canvasTex(128, 128, (g) => { g.strokeStyle = 'rgba(230,230,240,0.55)'; g.lineWidth = 1.2; for (let a = 0; a <= 6; a++) { const an = a / 6 * Math.PI / 2; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.cos(an) * 128, Math.sin(an) * 128); g.stroke(); } for (let r = 16; r < 128; r += 16) { g.beginPath(); for (let a = 0; a <= 6; a++) { const an = a / 6 * Math.PI / 2; a ? g.lineTo(Math.cos(an) * r, Math.sin(an) * r) : g.moveTo(Math.cos(an) * r, Math.sin(an) * r); } g.stroke(); } });
   for (const [x, z, ry] of [[X0 + 0.01, Z1 - 0.01, Math.PI / 2], [X1 - 0.01, Z1 - 0.01, -Math.PI / 2], [X0 + 0.01, Z0 + 0.01, Math.PI / 2]]) {
@@ -2617,7 +2636,7 @@ function lvlCellar() {
       : !flags.rackOpen ? ['The note is written backwards. While reading it, click again (or press E) to hold it up to a mirror.', `Set the levers on the wall: ${pattern.map((u, i) => `${i + 1} ${u ? 'UP' : 'DOWN'}`).join(', ')}.`]
       : !flags.got_fuse ? ['Take the fuse from the secret niche behind the wine rack.']
       : !flags.fuseIn ? ['Put the fuse in the gray fuse box near the door.']
-      : !flags.readCrate ? ['Read the note on the crate of old wine bottles.']
+      : !flags.readCrate ? ['Read the note pinned on the wall above the crate of old wine bottles.']
       : ['Look at each bottle\'s year. Put them in order from oldest (smallest year) to newest.', `The years are ${[...years].sort((a, b) => a - b).join(', ')}. Use the last digit of each.`, `The door code is ${code}.`],
   };
 }
@@ -2892,11 +2911,12 @@ function lockOf(h) {
   if (h.keypad) return { obj: h.keypad.group, dist: 0.3, isDone: () => h.keypad.done, kp: h.keypad };
   if (h.padlock) return { obj: h.padlock.group, dist: 0.22, isDone: () => h.padlock.done, pl: h.padlock };
   if (h.levers) return { obj: h.levers.group, dist: 0.75, isDone: () => h.levers.done };
+  if (h.zoomTo) return { obj: h.zoomTo, dist: 0.6, isDone: () => false, view: true };
   if (h.piano) return { obj: h.piano.anchor, dist: Math.max(0.75, 1.0 / camera.aspect), isDone: h.piano.isDone, piano: true };   // farther on narrow screens so all the keys fit
   return null;
 }
 function enterZoom(lk) {
-  Object.assign(zoom, { active: true, obj: lk.obj, dist: lk.dist, isDone: lk.isDone, kp: lk.kp || null, pl: lk.pl || null, piano: !!lk.piano, dial: 0, doneT: 0 });
+  Object.assign(zoom, { active: true, obj: lk.obj, dist: lk.dist, isDone: lk.isDone, kp: lk.kp || null, pl: lk.pl || null, piano: !!lk.piano, view: !!lk.view, dial: 0, doneT: 0 });
   sfx.click();
   if (document.pointerLockElement) document.exitPointerLock();   // free the mouse so you can click buttons
   renderer.domElement.classList.remove('playing');
@@ -2905,6 +2925,7 @@ function enterZoom(lk) {
   $('zoomHint').textContent = zoom.pl ? 'CLICK A DIAL TO TURN IT · OR TYPE THE NUMBERS · E OR ESC TO STEP BACK'
     : zoom.kp ? 'CLICK THE BUTTONS · OR TYPE NUMBERS ON YOUR KEYBOARD · E OR ESC TO STEP BACK'
     : zoom.piano ? 'CLICK THE PIANO KEYS TO PLAY THEM · E OR ESC TO STEP BACK'
+    : zoom.view ? 'CLICK A BOTTLE TO READ ITS LABEL · E OR ESC TO STEP BACK'
     : 'CLICK A LEVER TO PULL IT · E OR ESC TO STEP BACK';
   $('zoomHint').hidden = false;
 }
@@ -3165,7 +3186,7 @@ function frame() {
     if (kp.status === 'err' && (kp.statusT -= dt) <= 0) { kp.status = 'idle'; drawLCD(kp); }
   }
   for (const u of updaters) u(dt, t);
-  lanternLight.intensity = inv.has('lantern') ? 3.4 + Math.sin(t * 11) * 0.15 : 0;
+  lanternLight.intensity = inv.has('lantern') ? 4.2 + Math.sin(t * 11) * 0.15 : 0;
   for (const l of [pcLantern, vrLantern]) l.userData.flame.scale.y = 1.6 + Math.sin(t * 13) * 0.25;
 
   // Lightning and thunder now and then (rooms with a window)
