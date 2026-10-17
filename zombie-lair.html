@@ -2027,7 +2027,7 @@ function updateZombies(dt) {
 // ---------- Face booth: the family's faces go on the people running across the graveyard ----------
 // Photos are saved only on this device. "Send faces to headsets" passes them straight to any headset
 // that opens Zombie Lair in the next 2 minutes; they never go on the website.
-const MAX_FACES = 6;
+const MAX_FACES = 10;
 const FACE_ROOM = 'dexarcade-faces-family';
 let faces = [];
 try { faces = JSON.parse(localStorage.getItem('dexFaces') || '[]'); } catch (e) {}
