@@ -80,6 +80,8 @@
     <p>Line a face up in the box and press SNAP. Your faces go on the people running across the graveyard. Don't shoot them!</p>
     <div class="cam"><video id="faceVideo" autoplay playsinline muted></video><div class="frame"></div></div>
     <button id="snapBtn" class="primary" type="button">📸 SNAP</button>
+    <button id="uploadFaceBtn" type="button">📁 Upload a photo instead</button>
+    <input id="faceFile" type="file" accept="image/*" multiple hidden>
     <div id="faceList"></div>
     <button id="sendFacesBtn" type="button">📡 Send faces to headsets</button>
     <p id="faceStatus">Faces are saved only on this computer (and on headsets you send them to).</p>
@@ -2135,6 +2137,23 @@ async function checkForFaces() {
   });
   peer.on('error', () => { clearTimeout(give); peer.destroy(); });   // nobody sending: that's normal
 }
+// Use photos you already have: the middle of the picture is cut into a square (aim for a close-up of the face)
+function addFaceFromFile(file) {
+  const img = new Image();
+  img.onload = () => {
+    const size = 192, sq = Math.min(img.width, img.height);
+    const c = document.createElement('canvas'); c.width = c.height = size;
+    c.getContext('2d').drawImage(img, (img.width - sq) / 2, (img.height - sq) / 2, sq, sq, 0, 0, size, size);
+    faces.push(c.toDataURL('image/jpeg', 0.85));
+    if (faces.length > MAX_FACES) faces.shift();
+    saveFaces();
+    $id('faceStatus').textContent = `Added! ${faces.length} face${faces.length === 1 ? '' : 's'} saved.`;
+    URL.revokeObjectURL(img.src);
+  };
+  img.src = URL.createObjectURL(file);
+}
+$id('uploadFaceBtn').addEventListener('click', () => $id('faceFile').click());
+$id('faceFile').addEventListener('change', (e) => { for (const f of e.target.files) addFaceFromFile(f); e.target.value = ''; });
 $id('facesBtn').addEventListener('click', openFaceBooth);
 $id('snapBtn').addEventListener('click', snapFace);
 $id('sendFacesBtn').addEventListener('click', sendFaces);
