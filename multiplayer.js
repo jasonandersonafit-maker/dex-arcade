@@ -6,7 +6,7 @@
 
 const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
 let peerLib = null;
-function loadPeerJS() {
+export function loadPeerJS() {
   if (peerLib) return peerLib;
   peerLib = new Promise((resolve, reject) => {
     if (window.Peer) { resolve(window.Peer); return; }
@@ -25,24 +25,38 @@ export function createMultiplayer(opts) {
   const { THREE, renderer, gameId, title, color = '#ffd23d',
     soloLabel = 'PLAY SOLO', onSolo, onHostStart, onStart, onMessage, onConnected, onLeft, onArcade } = opts;
 
+  const maxPlayers = opts.maxPlayers ?? 3;
   const mp = {
     role: null,          // 'host' | 'guest' | null
-    connected: false,
+    connected: false,    // true once at least one other player is linked up
     code: '',
     status: '',
     page: 'main',        // main | host | join | joined
     typed: '',
     peer: null,
-    conn: null,
+    slot: 0,             // your player number: the host is 0, guests are 1, 2...
+    players: [0],        // the player numbers in this game (including you)
+    guests: new Map(),   // host only: player number -> connection
+    conn: null,          // guest only: the connection to the host
+    started: false,
   };
 
   // ---------- Networking ----------
+  // Everyone connects to the host. The host passes each guest's messages on to the other guests,
+  // and every message carries "_f": the player number it came from.
   const peerId = (code) => `dexarcade-${gameId}-${code}`;
   function setStatus(text) { mp.status = text; redraw(); }
+  const safeSend = (c, msg) => { try { c.send(msg); } catch (e) {} };
+  function hostStatus() {
+    const n = mp.players.length;
+    setStatus(n < 2 ? 'Waiting for friends to join...' : `${n} of ${maxPlayers} players here! Press START${n < maxPlayers ? ' or wait for more' : ''}.`);
+  }
+  function refreshPlayers() { mp.players = [0, ...[...mp.guests.keys()].sort()]; }
+  function broadcast(msg, except = null) { for (const c of mp.guests.values()) if (c !== except) safeSend(c, msg); }
 
   async function host() {
     leave(true);
-    mp.role = 'host'; mp.page = 'host';
+    mp.role = 'host'; mp.page = 'host'; mp.slot = 0; mp.players = [0]; mp.started = false;
     mp.code = String(1000 + Math.floor(Math.random() * 9000));
     setStatus('Starting...');
     let Peer;
@@ -50,12 +64,44 @@ export function createMultiplayer(opts) {
     if (mp.role !== 'host') return;
     const peer = new Peer(peerId(mp.code));
     mp.peer = peer;
-    peer.on('open', () => setStatus('Waiting for your friend to join...'));
-    peer.on('connection', (c) => { if (mp.conn) { c.on('open', () => c.close()); return; } setup(c); });
+    peer.on('open', () => hostStatus());
+    peer.on('connection', (c) => {
+      c.on('open', () => {
+        if (mp.started || mp.guests.size >= maxPlayers - 1) { safeSend(c, { t: '__full' }); setTimeout(() => c.close(), 500); return; }
+        let slot = 1; while (mp.guests.has(slot)) slot++;
+        c.slot = slot;
+        mp.guests.set(slot, c);
+        refreshPlayers();
+        safeSend(c, { t: '__hello', slot, players: mp.players });
+        broadcast({ t: '__players', players: mp.players }, c);
+        mp.connected = true;
+        hostStatus(); buzz();
+        onConnected?.('host', slot);
+      });
+      c.on('data', (msg) => {
+        if (!msg || mp.guests.get(c.slot) !== c) return;
+        if (msg.t === '__bye') { guestGone(c); return; }
+        msg._f = c.slot;
+        broadcast(msg, c);           // pass it on to the other guests
+        onMessage?.(msg, c.slot);
+      });
+      c.on('close', () => guestGone(c));
+      c.on('error', () => guestGone(c));
+    });
     peer.on('error', (e) => {
       if (e.type === 'unavailable-id') { host(); return; }   // code already taken: pick another
       setStatus('Network problem (' + e.type + ')');
     });
+  }
+  function guestGone(c) {
+    if (mp.guests.get(c.slot) !== c) return;
+    mp.guests.delete(c.slot);
+    refreshPlayers();
+    broadcast({ t: '__players', players: mp.players });
+    broadcast({ t: '__left', slot: c.slot });
+    mp.connected = mp.guests.size > 0;
+    if (mp.page === 'host') hostStatus();
+    onLeft?.(c.slot);
   }
   async function join(code) {
     leave(true);
@@ -66,48 +112,61 @@ export function createMultiplayer(opts) {
     if (mp.role !== 'guest') return;
     const peer = new Peer();
     mp.peer = peer;
-    peer.on('open', () => setup(peer.connect(peerId(code), { serialization: 'json', reliable: true })));   // reliable: no lost messages
+    peer.on('open', () => {
+      const c = peer.connect(peerId(code), { serialization: 'json', reliable: true });   // reliable: no lost messages
+      mp.conn = c;
+      c.on('data', (msg) => {
+        if (!msg) return;
+        if (msg.t === '__hello') {
+          mp.slot = msg.slot; mp.players = msg.players; mp.connected = true;
+          setStatus(`You're player ${msg.slot + 1}! Waiting for the host to start...`);
+          buzz();
+          onConnected?.('guest', msg.slot);
+          return;
+        }
+        if (msg.t === '__players') { mp.players = msg.players; if (mp.page === 'joined') setStatus(`${mp.players.length} players here. Waiting for the host to start...`); return; }
+        if (msg.t === '__full') { setStatus('That game is full or already playing.'); leave(true); mp.page = 'joined'; redraw(); return; }
+        if (msg.t === '__start') { close(); onStart?.(msg.data); return; }
+        if (msg.t === '__left') { onLeft?.(msg.slot); return; }
+        if (msg.t === '__bye') { hostGone(); return; }
+        onMessage?.(msg, msg._f ?? 0);
+      });
+      c.on('close', hostGone);
+      c.on('error', hostGone);
+    });
     peer.on('error', (e) => {
       setStatus(e.type === 'peer-unavailable' ? 'No game with code ' + code + '. Check the code!' : 'Network problem (' + e.type + ')');
     });
   }
-  function setup(c) {
-    mp.conn = c;
-    c.on('open', () => {
-      mp.connected = true;
-      setStatus(mp.role === 'host' ? 'Your friend joined! Press START.' : 'Connected! Waiting for the host to start...');
-      buzz();
-      onConnected?.(mp.role);
-    });
-    c.on('data', (msg) => {
-      if (msg && msg.t === '__start') { close(); onStart?.(msg.data); return; }
-      if (msg && msg.t === '__bye') { dropped(); return; }
-      onMessage?.(msg);
-    });
-    c.on('close', dropped);
-    c.on('error', dropped);
-  }
-  function dropped() {
+  function hostGone() {
     if (!mp.conn) return;
     mp.conn = null;
-    const was = mp.connected;
+    const was = mp.connected, others = mp.players.filter(s => s !== mp.slot);
     mp.connected = false;
-    if (mp.role === 'host') setStatus('Your friend left. Waiting for someone to join...');
-    else setStatus('Lost connection to the host.');
-    if (was) onLeft?.();
+    setStatus('Lost connection to the host.');
+    if (was) for (const s of others) onLeft?.(s);   // when the host goes, everyone goes
+    mp.players = [mp.slot];
   }
-  function send(msg) { if (mp.connected && mp.conn) { try { mp.conn.send(msg); } catch (e) {} } }
-  function startForBoth(data) {   // host only: tell the guest to start, and start here too
-    send({ t: '__start', data });
+  function send(msg) {
+    if (!mp.connected) return;
+    if (mp.role === 'host') { msg._f = 0; broadcast(msg); }
+    else if (mp.conn) safeSend(mp.conn, msg);
+  }
+  function startForBoth(data) {   // host only: tell everyone to start, and start here too
+    mp.started = true;
+    broadcast({ t: '__start', data });
     close();
     onStart?.(data);
   }
   function leave(quiet) {
-    if (mp.conn) { try { mp.conn.send({ t: '__bye' }); } catch (e) {} try { mp.conn.close(); } catch (e) {} }
+    const others = mp.players.filter(s => s !== mp.slot);
+    if (mp.role === 'host') { broadcast({ t: '__bye' }); for (const c of mp.guests.values()) { try { c.close(); } catch (e) {} } }
+    if (mp.conn) { safeSend(mp.conn, { t: '__bye' }); try { mp.conn.close(); } catch (e) {} }
     if (mp.peer) { try { mp.peer.destroy(); } catch (e) {} }
     const was = mp.connected;
     mp.conn = null; mp.peer = null; mp.connected = false; mp.role = null; mp.code = '';
-    if (was && !quiet) onLeft?.();
+    mp.guests = new Map(); mp.players = [0]; mp.slot = 0; mp.started = false;
+    if (was && !quiet) for (const s of others) onLeft?.(s);
   }
   addEventListener('beforeunload', () => leave(true));
 
@@ -273,8 +332,8 @@ export function createMultiplayer(opts) {
 
   // ---------- Open / close ----------
   function open(page = 'main') {
-    mp.page = mp.connected ? (mp.role === 'host' ? 'host' : 'joined') : page;
-    if (mp.connected && mp.role === 'host') mp.status = 'Your friend is here! Press START.';
+    mp.page = mp.role === 'host' ? 'host' : mp.connected ? 'joined' : page;
+    if (mp.role === 'host') { mp.started = false; hostStatus(); }   // back in the lobby: friends can join again
     if (mp.connected && mp.role === 'guest') mp.status = 'Waiting for the host to start...';
     panel.visible = renderer.xr.isPresenting;
     dom.style.display = renderer.xr.isPresenting ? 'none' : 'grid';
@@ -290,7 +349,7 @@ export function createMultiplayer(opts) {
   renderer.xr.addEventListener('sessionend', () => { if (isOpen()) open(mp.page); });
   const isOpen = () => panel.visible || dom.style.display !== 'none';
 
-  Object.assign(mp, { panel, open, close, isOpen, updatePointer, select, send, startForBoth, leave, host, join });
+  Object.assign(mp, { panel, open, close, isOpen, updatePointer, select, send, startForBoth, leave, host, join, maxPlayers });
   redraw();
   return mp;
 }

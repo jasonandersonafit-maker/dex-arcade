@@ -27,6 +27,26 @@
   #pauseMenu button { font:600 16px system-ui, sans-serif; color:var(--fg); background:#0e1a12; border:1px solid #23402a;
                       border-radius:8px; padding:10px 16px; cursor:pointer; }
   #pauseMenu button.primary { background:var(--accent); color:#05070c; border-color:var(--accent); }
+  /* Face booth: snap your family's faces for the people in the graveyard */
+  #facesBtn { position:fixed; right:16px; top:64px; font:600 15px system-ui, sans-serif; color:var(--fg); background:rgba(5,7,12,.85);
+              border:1px solid #23402a; border-radius:8px; padding:8px 12px; cursor:pointer; }
+  #facesBtn:hover { border-color:var(--accent); }
+  #faceBooth { position:fixed; inset:0; display:grid; place-items:center; background:rgba(5,7,12,.7); padding:16px; z-index:60; }
+  #faceBooth .card { background:rgba(5,7,12,.97); border:1px solid #23402a; border-radius:12px; padding:20px 24px; max-width:460px; width:100%;
+                     display:flex; flex-direction:column; gap:12px; text-align:center; max-height:calc(100vh - 32px); overflow:auto; }
+  #faceBooth h2 { margin:0; font-size:24px; letter-spacing:.1em; color:var(--accent); }
+  #faceBooth p { margin:0; color:var(--muted); font-size:13px; }
+  #faceBooth button { font:600 15px system-ui, sans-serif; color:var(--fg); background:#0e1a12; border:1px solid #23402a; border-radius:8px; padding:10px 14px; cursor:pointer; }
+  #faceBooth button:hover { border-color:var(--accent); }
+  #faceBooth button.primary { background:var(--accent); color:#05070c; border-color:var(--accent); font-size:18px; }
+  .cam { position:relative; width:100%; aspect-ratio:4/3; background:#000; border-radius:8px; overflow:hidden; }
+  .cam video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  .cam .frame { position:absolute; left:50%; top:46%; width:46.5%; aspect-ratio:1; transform:translate(-50%,-50%);
+                border:3px dashed var(--accent); border-radius:12px; box-shadow:0 0 0 999px rgba(0,0,0,.45); }
+  #faceList { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; }
+  #faceList .face { position:relative; }
+  #faceList img { width:64px; height:64px; border-radius:8px; border:2px solid #23402a; display:block; }
+  #faceList .del { position:absolute; right:-6px; top:-6px; width:22px; height:22px; padding:0; border-radius:50%; font-size:12px; line-height:1; }
   /* Secret invincibility badge (type 7655) */
   #godBadge { position:fixed; left:16px; bottom:16px; font:800 14px system-ui, sans-serif; letter-spacing:.1em; color:#ffd23d;
               background:rgba(5,7,12,.8); border:2px solid #ffd23d; border-radius:8px; padding:6px 10px; pointer-events:none; }
@@ -53,6 +73,19 @@
   <p><b>Pause:</b> <b>P</b> or <b>Esc</b> on PC, the <b>Y</b> button on Quest.</p>
 </div>
 <button id="pauseBtn" type="button">❚❚ Pause</button>
+<button id="facesBtn" type="button">📸 Faces</button>
+<div id="faceBooth" hidden>
+  <div class="card">
+    <h2>FACE BOOTH</h2>
+    <p>Line a face up in the box and press SNAP. Your faces go on the people running across the graveyard. Don't shoot them!</p>
+    <div class="cam"><video id="faceVideo" autoplay playsinline muted></video><div class="frame"></div></div>
+    <button id="snapBtn" class="primary" type="button">📸 SNAP</button>
+    <div id="faceList"></div>
+    <button id="sendFacesBtn" type="button">📡 Send faces to headsets</button>
+    <p id="faceStatus">Faces are saved only on this computer (and on headsets you send them to).</p>
+    <button id="closeFacesBtn" type="button">Done</button>
+  </div>
+</div>
 <div id="godBadge" hidden>★ INVINCIBLE</div>
 <div id="pauseMenu" hidden>
   <div class="card">
@@ -81,7 +114,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
-import { createMultiplayer } from './multiplayer.js';
+import { createMultiplayer, loadPeerJS } from './multiplayer.js';
 
 // ---------- Co-op (playing with a friend) ----------
 // The host's game runs the zombies; the guest's game shows the same zombies and sends its shots to the host.
@@ -806,14 +839,22 @@ function makeZombie(look = {}) {
   });
   const headPivot = new THREE.Group(); headPivot.position.y = 0.9; torso.add(headPivot);
   box(0.38, 0.38, 0.38, skin, headPivot, 0, 0, 0, 'head');
-  for (const ex of [-0.09, 0.09]) {
+  // A real face photo from the face booth (people only)
+  if (look.face) {
+    const photo = new THREE.Mesh(new THREE.PlaneGeometry(0.37, 0.37), new THREE.MeshBasicMaterial({ map: look.face }));
+    photo.position.set(0, 0, 0.192);
+    photo.userData.part = 'head';
+    headPivot.add(photo);
+    parts.push(photo);
+  }
+  if (!look.face) for (const ex of [-0.09, 0.09]) {
     const eye = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.02), eyes);
     eye.position.set(ex, 0.05, 0.195);
     headPivot.add(eye);
   }
   const mouth = new THREE.Mesh(new THREE.BoxGeometry(look.human ? 0.08 : 0.18, look.human ? 0.08 : 0.05, 0.02), mouthMat);
   mouth.position.set(0, -0.09, 0.195);
-  headPivot.add(mouth);
+  if (!look.face) headPivot.add(mouth);
   if (look.hair) {
     const hairMat = new THREE.MeshStandardMaterial({ color: look.hair, flatShading: true });
     box(0.4, 0.1, 0.4, hairMat, headPivot, 0, 0.22, 0, 'head');
@@ -1101,7 +1142,10 @@ let personTimer = 4;
 function spawnPerson(net = null) {
   const li = net ? net.li : Math.floor(Math.random() * PEOPLE_LOOKS.length);
   const look = PEOPLE_LOOKS[li];
-  const p = makeZombie({ ...look, eyes: 0x111111, human: true });
+  // Wear one of the family's faces from the face booth (if any were taken)
+  const fi = net ? (net.fi ?? 0) : Math.floor(Math.random() * 1000);
+  const face = faceTextures.length ? faceTextures[fi % faceTextures.length] : null;
+  const p = makeZombie({ ...look, eyes: 0x111111, human: true, face });
   const u = p.userData;
   u.person = true;
   u.rising = false;
@@ -1110,7 +1154,7 @@ function spawnPerson(net = null) {
   u.speed = net ? net.sp : 2 + Math.random() * 1.2;
   p.position.set(fromLeft ? -12 : 12, 0, net ? net.z : -2.8 - Math.random() * 5);
   if (net) u.id = net.id;
-  else if (isHost()) mp.send({ t: 'sp', k: 'p', id: u.id, li, dir: u.dir, sp: u.speed, z: p.position.z });
+  else if (isHost()) mp.send({ t: 'sp', k: 'p', id: u.id, li, fi, dir: u.dir, sp: u.speed, z: p.position.z });
   p.rotation.y = u.dir * Math.PI / 2;   // face the way they're running
   const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: helpTex, transparent: true }));
   bubble.scale.set(0.8, 0.4, 1);
@@ -1977,6 +2021,127 @@ function updateZombies(dt) {
     }
   }
 }
+
+// ---------- Face booth: the family's faces go on the people running across the graveyard ----------
+// Photos are saved only on this device. "Send faces to headsets" passes them straight to any headset
+// that opens Zombie Lair in the next 2 minutes; they never go on the website.
+const MAX_FACES = 6;
+const FACE_ROOM = 'dexarcade-faces-family';
+let faces = [];
+try { faces = JSON.parse(localStorage.getItem('dexFaces') || '[]'); } catch (e) {}
+const faceTextures = [];
+function rebuildFaceTextures() {
+  faceTextures.length = 0;
+  for (const url of faces) {
+    const img = new Image();
+    const tex = new THREE.Texture(img);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    img.onload = () => { tex.needsUpdate = true; };
+    img.src = url;
+    faceTextures.push(tex);
+  }
+}
+rebuildFaceTextures();
+const $id = (id) => document.getElementById(id);
+function saveFaces() {
+  try { localStorage.setItem('dexFaces', JSON.stringify(faces)); } catch (e) { $id('faceStatus').textContent = 'Could not save the faces on this device.'; }
+  rebuildFaceTextures();
+  renderFaceList();
+}
+function renderFaceList() {
+  const list = $id('faceList');
+  list.innerHTML = '';
+  faces.forEach((url, i) => {
+    const d = document.createElement('div'); d.className = 'face';
+    const img = document.createElement('img'); img.src = url; img.alt = 'Face ' + (i + 1);
+    const del = document.createElement('button'); del.className = 'del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Delete this face';
+    del.addEventListener('click', () => { faces.splice(i, 1); saveFaces(); });
+    d.append(img, del); list.append(d);
+  });
+  if (!faces.length) list.innerHTML = '<p>No faces yet.</p>';
+}
+let camStream = null;
+async function openFaceBooth() {
+  if (renderer.xr.isPresenting) return;
+  setPaused(true); $id('pauseMenu').hidden = true;
+  $id('faceBooth').hidden = false;
+  renderFaceList();
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 }, audio: false });
+    $id('faceVideo').srcObject = camStream;
+  } catch (e) {
+    $id('faceStatus').textContent = 'Could not turn on the camera. Click "Allow" when Chrome asks, or check that a webcam is plugged in.';
+  }
+}
+function closeFaceBooth() {
+  if (camStream) { for (const tr of camStream.getTracks()) tr.stop(); camStream = null; }
+  $id('faceVideo').srcObject = null;
+  $id('faceBooth').hidden = true;
+  setPaused(false);
+}
+function snapFace() {
+  const v = $id('faceVideo');
+  if (!v.videoWidth) { $id('faceStatus').textContent = 'The camera isn\'t on yet.'; return; }
+  // Cut out the square inside the dashed box (the preview is mirrored, so the photo is too)
+  const size = 192, sq = Math.min(v.videoWidth, v.videoHeight) * 0.62;
+  const sx = (v.videoWidth - sq) / 2, sy = v.videoHeight * 0.46 - sq / 2;
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d');
+  g.translate(size, 0); g.scale(-1, 1);
+  g.drawImage(v, sx, Math.max(0, sy), sq, sq, 0, 0, size, size);
+  faces.push(c.toDataURL('image/jpeg', 0.85));
+  if (faces.length > MAX_FACES) faces.shift();
+  saveFaces();
+  beep(1200, 0.08, 'square', 0.1);
+  $id('faceStatus').textContent = `Got it! ${faces.length} face${faces.length === 1 ? '' : 's'} saved.`;
+}
+// Send: this computer waits 2 minutes for headsets to collect the faces
+let facePeer = null;
+async function sendFaces() {
+  if (!faces.length) { $id('faceStatus').textContent = 'Take some face photos first!'; return; }
+  let Peer;
+  try { Peer = await loadPeerJS(); } catch (e) { $id('faceStatus').textContent = 'No internet? Could not send.'; return; }
+  if (facePeer) facePeer.destroy();
+  const peer = new Peer(FACE_ROOM);
+  facePeer = peer;
+  let sent = 0, left = 120;
+  const tick = setInterval(() => {
+    left--;
+    if (facePeer !== peer) { clearInterval(tick); return; }
+    $id('faceStatus').textContent = `📡 Sending for ${left}s: open Zombie Lair on each Quest now. Sent to ${sent} headset${sent === 1 ? '' : 's'}.`;
+    if (left <= 0) { clearInterval(tick); peer.destroy(); facePeer = null; $id('faceStatus').textContent = `Done. Sent to ${sent} headset${sent === 1 ? '' : 's'}.`; }
+  }, 1000);
+  peer.on('connection', (c) => c.on('open', () => { c.send({ faces }); sent++; setTimeout(() => c.close(), 2000); }));
+  peer.on('error', (e) => {
+    $id('faceStatus').textContent = e.type === 'unavailable-id' ? 'Another device is already sending faces. Try again in a minute.' : 'Network problem (' + e.type + ')';
+  });
+}
+// Receive: when Zombie Lair opens, quietly check if a computer is sending faces right now
+async function checkForFaces() {
+  let Peer;
+  try { Peer = await loadPeerJS(); } catch (e) { return; }
+  const peer = new Peer();
+  const give = setTimeout(() => peer.destroy(), 15000);
+  peer.on('open', () => {
+    const c = peer.connect(FACE_ROOM, { serialization: 'json', reliable: true });
+    c.on('data', (msg) => {
+      if (msg && Array.isArray(msg.faces) && msg.faces.every(f => typeof f === 'string' && f.startsWith('data:image/'))) {
+        faces = msg.faces.slice(0, MAX_FACES);
+        saveFaces();
+        showBanner(`GOT ${faces.length} FACE${faces.length === 1 ? '' : 'S'}!`, 'look out for them in the graveyard', '#ffd23d');
+      }
+      clearTimeout(give); setTimeout(() => peer.destroy(), 500);
+    });
+  });
+  peer.on('error', () => { clearTimeout(give); peer.destroy(); });   // nobody sending: that's normal
+}
+$id('facesBtn').addEventListener('click', openFaceBooth);
+$id('snapBtn').addEventListener('click', snapFace);
+$id('sendFacesBtn').addEventListener('click', sendFaces);
+$id('closeFacesBtn').addEventListener('click', closeFaceBooth);
+renderer.xr.addEventListener('sessionstart', () => { $id('facesBtn').hidden = true; });
+renderer.xr.addEventListener('sessionend', () => { $id('facesBtn').hidden = false; });
+setTimeout(checkForFaces, 1500);
 
 // ---------- Co-op: your friend, and keeping both games in step ----------
 let inMenu = true;   // the play solo / host / join menu shows first
